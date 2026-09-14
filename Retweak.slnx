@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Retweak.Service/Retweak.Service.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Retweak.Service.Tests/Retweak.Service.Tests.csproj" />
+  </Folder>
+</Solution>

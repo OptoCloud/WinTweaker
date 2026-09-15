@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Win32.TaskScheduler;
 using Retweak.Service.Configuration;

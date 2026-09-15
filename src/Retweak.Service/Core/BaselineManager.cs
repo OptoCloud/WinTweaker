@@ -81,10 +81,9 @@ public sealed class BaselineManager
 
         try
         {
-            PassReport last;
             while (true)
             {
-                last = RunPass(source);
+                var last = RunPass(source);
 
                 lock (_applyGate)
                 {
@@ -313,31 +312,48 @@ public sealed class BaselineManager
                 firstReport = _noncompliant.Add(id);
             }
 
+            string desiredDescription = entry.EnsureAbsent
+                ? "(absent)"
+                : $"{(entry.Kind == RegistryValueKind.MultiString ? string.Join('|', entry.Values) : entry.Value)} ({entry.Kind})";
+
             if (firstReport && !IsLikelySelfEcho())
             {
                 _log.LogWarning(
-                    "Drift: {Id} was {Actual} ({ActualKind}), expected {Desired} ({DesiredKind}); trigger={Source}.",
+                    "Drift: {Id} was {Actual} ({ActualKind}), expected {Desired}; trigger={Source}.",
                     id,
                     RegistryHelpers.Describe(actual),
                     actualKind,
-                    entry.Kind == RegistryValueKind.MultiString ? string.Join('|', entry.Values) : entry.Value,
-                    entry.Kind,
+                    desiredDescription,
                     source);
             }
 
-            using var writable = root.CreateSubKey(path, writable: true);
-            if (writable is null)
+            if (entry.EnsureAbsent)
+            {
+                // Open rather than create: if the key is already gone there is nothing
+                // to delete, and creating it just to check would be actively wrong.
+                using RegistryKey? writable = root.OpenSubKey(path, writable: true);
+                if (writable is null)
+                {
+                    return EntryOutcome.Compliant;
+                }
+
+                writable.DeleteValue(entry.Name, throwOnMissingValue: false);
+                Interlocked.Exchange(ref _lastSelfWriteTicks, Environment.TickCount64);
+                _log.LogInformation("Enforced: {Id} removed.", id);
+                return EntryOutcome.Repaired;
+            }
+
+            using var writableSet = root.CreateSubKey(path, writable: true);
+            if (writableSet is null)
             {
                 _log.LogError("Could not open or create {Id} for writing.", id);
                 return EntryOutcome.Failed;
             }
 
-            writable.SetValue(entry.Name, entry.ParseDesiredValue(), entry.Kind);
+            writableSet.SetValue(entry.Name, entry.ParseDesiredValue(), entry.Kind);
             Interlocked.Exchange(ref _lastSelfWriteTicks, Environment.TickCount64);
 
-            _log.LogInformation("Enforced: {Id} set to {Desired}.",
-                id,
-                entry.Kind == RegistryValueKind.MultiString ? string.Join('|', entry.Values) : entry.Value);
+            _log.LogInformation("Enforced: {Id} set to {Desired}.", id, desiredDescription);
 
             return EntryOutcome.Repaired;
         }
@@ -366,7 +382,9 @@ public sealed class BaselineManager
         using RegistryKey? key = root.OpenSubKey(path, writable: false);
         if (key is null)
         {
-            return false;
+            // A missing key can never hold the value: compliant for EnsureAbsent,
+            // non-compliant otherwise.
+            return entry.EnsureAbsent;
         }
 
         // DoNotExpandEnvironmentNames keeps REG_EXPAND_SZ in its stored form so that
@@ -374,10 +392,15 @@ public sealed class BaselineManager
         actual = key.GetValue(entry.Name, defaultValue: null, RegistryValueOptions.DoNotExpandEnvironmentNames);
         if (actual is null)
         {
-            return false;
+            return entry.EnsureAbsent;
         }
 
         actualKind = key.GetValueKind(entry.Name);
+
+        if (entry.EnsureAbsent)
+        {
+            return false;
+        }
 
         return RegistryHelpers.EqualsNorm(entry.Kind, entry.ParseDesiredValue(), actualKind, actual, _norm);
     }

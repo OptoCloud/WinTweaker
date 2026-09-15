@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.ServiceProcess;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Win32;
 using Retweak.Service.Configuration;

@@ -107,6 +107,35 @@ public class ConfigurationTests
     }
 
     [Fact]
+    public void EnsureAbsentEntryIgnoresKindAndValue()
+    {
+        // Kind/Value are left at defaults and would otherwise be nonsense (an empty
+        // DWord), but EnsureAbsent means they are never consulted.
+        var entry = new BaselineEntry
+        {
+            Path = @"SOFTWARE\Foo",
+            Name = "Bar",
+            EnsureAbsent = true,
+        };
+
+        Assert.True(entry.TryValidate(out string error), error);
+    }
+
+    [Fact]
+    public void EnsureAbsentStillRejectsBadPath()
+    {
+        var entry = new BaselineEntry
+        {
+            Path = @"HKLM:\SOFTWARE\Foo",
+            Name = "Bar",
+            EnsureAbsent = true,
+        };
+
+        Assert.False(entry.TryValidate(out string error));
+        Assert.Contains("relative", error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void SectionBindsEntriesAndScopes()
     {
         const string Json = """

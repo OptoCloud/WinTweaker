@@ -34,6 +34,14 @@ Uninstall with `.\scripts\uninstall.ps1 -RemoveFiles`. Add `-Report` first if yo
 
 Bad entries fail validation at startup rather than being skipped silently, so a typo stops the service with a reason in the log instead of quietly leaving a value unenforced.
 
+Setting `EnsureAbsent: true` on an entry flips its meaning: `Kind`/`Value`/`Values` are ignored, and the entry is compliant only when the value does not exist at all. A missing key already counts as compliant (there is nothing to delete), and repair deletes just that value, never the key. This only covers deleting a single *value* — deleting an entire *key* is deliberately not supported, because continuously re-enforcing "this whole subtree must never exist" is a much larger blast radius than anything else here, especially if you were also watching that key.
+
+## Importing a .reg file
+
+`Retweak.Service.exe --convert-reg a.reg [b.reg ...] [--out entries.json]` converts one or more `.reg` files into the equivalent `Entries` JSON, printed to stdout (or written to `--out`) for you to review and paste into `appsettings.json` yourself. This is a one-shot CLI mode intercepted before any host, config, or logging setup runs — it never touches a live install and never merges anything automatically. That is deliberate, not a missing feature: the whole point of this config format is that you can read `appsettings.json` and know exactly what is enforced, and an importer that quietly wrote to it would break that.
+
+It understands what `regedit /e` actually exports: the `dword:`/`hex:`/`hex(2):`/`hex(7):`/`hex(b):` value forms, backslash line continuations, comments, the default value (`@=`), and value deletion (`"Name"=-`, which becomes `EnsureAbsent: true`). `HKEY_CURRENT_USER` always maps to `Scope: PerUser` — a `.reg` file's HKCU section only ever wrote to whoever was logged on at export time, and applying it to every user of the machine is what importing a tweak almost always actually means. `HKEY_CLASSES_ROOT` is approximated as `Scope: Machine` under `SOFTWARE\Classes`, which skips the separate per-user `HKCU\SOFTWARE\Classes` override layer. `HKEY_USERS\{SID}`, `HKEY_CURRENT_CONFIG`, and whole-key deletion (`[-HKEY...\Key]`) have no equivalent and are reported as skipped on stderr — never silently dropped, never guessed at.
+
 ## Services and scheduled tasks
 
 Beyond registry values, `ServiceEntries` and `ScheduledTaskEntries` let you keep a Windows service or a scheduled task pinned to a desired state:
@@ -105,6 +113,8 @@ src/Retweak.Service/
   Core/UserHives.cs                   HKU enumeration
   Core/ServiceBaselineManager.cs      service start type / running state
   Core/ScheduledTaskBaselineManager.cs scheduled task Enabled flag
+  Core/RegFileParser.cs               .reg file -> BaselineEntry conversion
+  Core/RegConvertCli.cs               --convert-reg CLI mode
   Infra/NativeMethods.cs              P/Invoke
   Infra/RegistryWatcher.cs            notification watcher
   Infra/WatcherManager.cs             watcher lifecycle and hive reconciliation

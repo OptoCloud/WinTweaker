@@ -41,6 +41,16 @@ public sealed class BaselineEntry
     public string[] Values { get; set; } = [];
 
     /// <summary>
+    /// When true, the entry is compliant only when this value does not exist at all;
+    /// <see cref="Kind"/>, <see cref="Value"/> and <see cref="Values"/> are ignored.
+    /// A missing key counts as compliant (there is nothing to delete); repair deletes
+    /// just this value, not the key. This does not support deleting an entire key
+    /// (a .reg file's "[-HKEY...\Key]" form) — that is a much larger blast radius than
+    /// anything else this service does, and is deliberately out of scope.
+    /// </summary>
+    public bool EnsureAbsent { get; set; }
+
+    /// <summary>
     /// Install a change watcher for this entry's key. Set false for values you only
     /// want repaired by the periodic audit (e.g. keys that churn constantly).
     /// </summary>
@@ -106,6 +116,12 @@ public sealed class BaselineEntry
         {
             error = $"PerUser path '{Path}' must not include the SID; it is prefixed automatically.";
             return false;
+        }
+
+        if (EnsureAbsent)
+        {
+            error = "";
+            return true;
         }
 
         try

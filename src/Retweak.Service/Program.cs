@@ -14,6 +14,14 @@ using Retweak.Service.Workers;
 
 const string RegistryConfigPath = @"SOFTWARE\OptoCloud\Retweak\Config";
 
+// A one-shot CLI utility, not the service. Handled before any host/config/logging setup
+// so it can never interact with a live install; see RegConvertCli for why it only ever
+// prints output for review rather than touching appsettings.json itself.
+if (args.Length > 0 && string.Equals(args[0], "--convert-reg", StringComparison.OrdinalIgnoreCase))
+{
+    Environment.Exit(RegConvertCli.Run(args[1..]));
+}
+
 HostApplicationBuilder builder = Host.CreateApplicationBuilder(args);
 
 // A single-file published service has its content root at the extraction directory unless

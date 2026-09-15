@@ -21,6 +21,8 @@
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.0" />
     <PackageReference Include="Microsoft.Extensions.Logging.EventLog" Version="10.0.0" />
+    <!-- Wraps the COM Task Scheduler API for enforcing scheduled task Enabled state. -->
+    <PackageReference Include="TaskScheduler" Version="2.12.2" />
   </ItemGroup>
 
   <ItemGroup>

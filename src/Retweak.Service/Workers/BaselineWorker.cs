@@ -23,6 +23,8 @@ public sealed class BaselineWorker : BackgroundService
     private readonly RetweakOptions _options;
     private readonly BaselineManager _baseline;
     private readonly WatcherManager _watchers;
+    private readonly ServiceBaselineManager _services;
+    private readonly ScheduledTaskBaselineManager _scheduledTasks;
     private readonly ChangeTrigger _trigger;
     private readonly SessionEventBus _sessions;
     private readonly ILogger<BaselineWorker> _log;
@@ -46,6 +48,8 @@ public sealed class BaselineWorker : BackgroundService
         IOptions<RetweakOptions> options,
         BaselineManager baseline,
         WatcherManager watchers,
+        ServiceBaselineManager services,
+        ScheduledTaskBaselineManager scheduledTasks,
         ChangeTrigger trigger,
         SessionEventBus sessions,
         ILogger<BaselineWorker> log)
@@ -53,6 +57,8 @@ public sealed class BaselineWorker : BackgroundService
         _options = options.Value;
         _baseline = baseline;
         _watchers = watchers;
+        _services = services;
+        _scheduledTasks = scheduledTasks;
         _trigger = trigger;
         _sessions = sessions;
         _log = log;
@@ -73,6 +79,8 @@ public sealed class BaselineWorker : BackgroundService
         _log.LogInformation(
             "Initial pass: {Checked} checked, {Repaired} repaired, {Failed} failed.",
             initial.Checked, initial.Repaired, initial.Failed);
+
+        ApplyServicesAndScheduledTasks("startup");
 
         _watchers.EnsureMachineWatchers();
         foreach (string sid in _watchers.ReconcileUserWatchers())
@@ -261,6 +269,32 @@ public sealed class BaselineWorker : BackgroundService
                 report.Checked, report.Repaired, report.Failed,
                 _watchers.WatcherCount, _watchers.WatchedSids.Count,
                 (int)report.Elapsed.TotalMilliseconds);
+
+            ApplyServicesAndScheduledTasks("audit");
+        }
+    }
+
+    /// <summary>
+    /// Applies the services and scheduled-task baselines. Unlike the registry baseline
+    /// these have no cheap change notification, so this only runs here: once at startup
+    /// and once per audit interval, never reactively.
+    /// </summary>
+    private void ApplyServicesAndScheduledTasks(string source)
+    {
+        if (_options.ServiceEntries.Count > 0)
+        {
+            PassReport services = _services.ApplyBaseline(source);
+            _log.LogInformation(
+                "Services ({Source}): {Checked} checked, {Ok} ok, {Failed} failed.",
+                source, services.Checked, services.Repaired, services.Failed);
+        }
+
+        if (_options.ScheduledTaskEntries.Count > 0)
+        {
+            PassReport tasks = _scheduledTasks.ApplyBaseline(source);
+            _log.LogInformation(
+                "Scheduled tasks ({Source}): {Checked} checked, {Ok} ok, {Failed} failed.",
+                source, tasks.Checked, tasks.Repaired, tasks.Failed);
         }
     }
 

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.ServiceProcess;
 using Microsoft.Win32;
 
 namespace Retweak.Service.Configuration;
@@ -194,6 +195,89 @@ public sealed class BaselineEntry
     }
 }
 
+public enum DesiredServiceRunState
+{
+    Running,
+    Stopped,
+}
+
+/// <summary>
+/// A Windows service to keep enforced. At least one of <see cref="StartType"/> or
+/// <see cref="RunState"/> must be set.
+/// </summary>
+public sealed class ServiceEntry
+{
+    /// <summary>Service name (the short name SCM uses, e.g. "wuauserv"), not the display name.</summary>
+    public string Name { get; set; } = "";
+
+    /// <summary>
+    /// Desired start type. Enforced by writing the Start value under
+    /// HKLM\SYSTEM\CurrentControlSet\Services\{Name} directly, which is what SCM itself
+    /// reads and what `sc.exe config` ultimately writes; it does not require opening a
+    /// handle to the service itself. Null means "don't enforce start type".
+    /// </summary>
+    public ServiceStartMode? StartType { get; set; }
+
+    /// <summary>
+    /// Desired running state, enforced via the Service Control Manager (start/stop).
+    /// Null means "don't enforce running state".
+    /// </summary>
+    public DesiredServiceRunState? RunState { get; set; }
+
+    public string DescribeAt() => $"Service\\{Name}";
+
+    public bool TryValidate(out string error)
+    {
+        if (string.IsNullOrWhiteSpace(Name))
+        {
+            error = "Name is required.";
+            return false;
+        }
+
+        if (StartType is null && RunState is null)
+        {
+            error = $"Service '{Name}' has neither StartType nor RunState set; nothing to enforce.";
+            return false;
+        }
+
+        error = "";
+        return true;
+    }
+}
+
+/// <summary>A scheduled task to keep enabled or disabled.</summary>
+public sealed class ScheduledTaskEntry
+{
+    /// <summary>
+    /// Full task path as Task Scheduler shows it, e.g.
+    /// "\Microsoft\Windows\Application Experience\Microsoft Compatibility Appraiser".
+    /// Retweak enforces existing tasks; it does not create or delete tasks.
+    /// </summary>
+    public string Path { get; set; } = "";
+
+    public bool Enabled { get; set; }
+
+    public string DescribeAt() => $"Task\\{Path}";
+
+    public bool TryValidate(out string error)
+    {
+        if (string.IsNullOrWhiteSpace(Path))
+        {
+            error = "Path is required.";
+            return false;
+        }
+
+        if (!Path.StartsWith('\\'))
+        {
+            error = $"Task path '{Path}' should be the full path Task Scheduler shows, starting with '\\'.";
+            return false;
+        }
+
+        error = "";
+        return true;
+    }
+}
+
 public sealed class RetweakOptions
 {
     public const string SectionName = "Retweak";
@@ -249,6 +333,10 @@ public sealed class RetweakOptions
     public bool EnableOfflineProfiles { get; set; }
 
     public List<BaselineEntry> Entries { get; set; } = [];
+
+    public List<ServiceEntry> ServiceEntries { get; set; } = [];
+
+    public List<ScheduledTaskEntry> ScheduledTaskEntries { get; set; } = [];
 
     public IEnumerable<BaselineEntry> MachineEntries =>
         Entries.Where(e => e.Scope == BaselineScope.Machine);

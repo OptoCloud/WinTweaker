@@ -34,6 +34,27 @@ Uninstall with `.\scripts\uninstall.ps1 -RemoveFiles`. Add `-Report` first if yo
 
 Bad entries fail validation at startup rather than being skipped silently, so a typo stops the service with a reason in the log instead of quietly leaving a value unenforced.
 
+## Services and scheduled tasks
+
+Beyond registry values, `ServiceEntries` and `ScheduledTaskEntries` let you keep a Windows service or a scheduled task pinned to a desired state:
+
+```json
+{
+  "ServiceEntries": [
+    { "Name": "DiagTrack", "StartType": "Disabled", "RunState": "Stopped" }
+  ],
+  "ScheduledTaskEntries": [
+    { "Path": "\\Microsoft\\Windows\\Application Experience\\Microsoft Compatibility Appraiser", "Enabled": false }
+  ]
+}
+```
+
+A `ServiceEntry` needs at least one of `StartType` (`Boot`/`System`/`Automatic`/`Manual`/`Disabled`) or `RunState` (`Running`/`Stopped`); `StartType` is enforced by writing the `Start` value under `HKLM\SYSTEM\CurrentControlSet\Services\{Name}` directly — the same value SCM itself reads and `sc.exe config` ultimately writes — and `RunState` is enforced through the Service Control Manager (`ServiceController.Start()`/`.Stop()`). A `ScheduledTaskEntry` needs the task's full path exactly as Task Scheduler shows it (starting with `\`) and enforces only its `Enabled` flag.
+
+Retweak enforces *existing* services and tasks; it never creates, deletes, or otherwise redefines one, and it never touches a service's binary path, account, or dependencies. It also can't force-stop a service with `CanStop = false`, and it logs and moves on rather than aborting the pass when a named service or task doesn't exist.
+
+Unlike registry values, neither services nor scheduled tasks have a cheap change-notification API, so these are only checked at startup and once per audit interval (`AuditIntervalMinutes`) — never reactively. A drifted service or task can therefore take up to that long to be repaired, not the sub-second reaction time registry entries get.
+
 Overrides live at `HKLM\SOFTWARE\OptoCloud\Retweak\Config`. Scalar values there map onto option names directly (`AuditIntervalMinutes` as REG_DWORD, `EventSourceName` as REG_SZ, and a `LogLevel` REG_SZ mapping to the default log level). Because an array does not map onto flat registry values, a REG_SZ or REG_MULTI_SZ value named `Json` is parsed as a full JSON document and merged exactly like a second appsettings file — that is how you override `Entries`. Registry config is read once at startup; the service is cheap to restart.
 
 ## How enforcement works
@@ -82,6 +103,8 @@ src/Retweak.Service/
   Core/BaselineManager.cs             apply/audit, serialisation, drift bookkeeping
   Core/RegistryHelpers.cs             EqualsNorm, view selection
   Core/UserHives.cs                   HKU enumeration
+  Core/ServiceBaselineManager.cs      service start type / running state
+  Core/ScheduledTaskBaselineManager.cs scheduled task Enabled flag
   Infra/NativeMethods.cs              P/Invoke
   Infra/RegistryWatcher.cs            notification watcher
   Infra/WatcherManager.cs             watcher lifecycle and hive reconciliation

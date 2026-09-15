@@ -74,6 +74,8 @@ builder.Services.AddSingleton<ChangeTrigger>();
 builder.Services.AddSingleton<SessionEventBus>();
 builder.Services.AddSingleton<BaselineManager>();
 builder.Services.AddSingleton<WatcherManager>();
+builder.Services.AddSingleton<ServiceBaselineManager>();
+builder.Services.AddSingleton<ScheduledTaskBaselineManager>();
 builder.Services.AddHostedService<BaselineWorker>();
 
 if (WindowsServiceHelpers.IsWindowsService())
@@ -98,7 +100,7 @@ await host.RunAsync();
 
 static bool ValidateOptions(RetweakOptions options)
 {
-    if (options.Entries.Count == 0)
+    if (options.Entries.Count == 0 && options.ServiceEntries.Count == 0 && options.ScheduledTaskEntries.Count == 0)
     {
         return false;
     }
@@ -108,6 +110,24 @@ static bool ValidateOptions(RetweakOptions options)
         if (!entry.TryValidate(out string error))
         {
             Console.Error.WriteLine($"Invalid baseline entry {entry.Path}!{entry.Name}: {error}");
+            return false;
+        }
+    }
+
+    foreach (ServiceEntry entry in options.ServiceEntries)
+    {
+        if (!entry.TryValidate(out string error))
+        {
+            Console.Error.WriteLine($"Invalid service entry {entry.Name}: {error}");
+            return false;
+        }
+    }
+
+    foreach (ScheduledTaskEntry entry in options.ScheduledTaskEntries)
+    {
+        if (!entry.TryValidate(out string error))
+        {
+            Console.Error.WriteLine($"Invalid scheduled task entry {entry.Path}: {error}");
             return false;
         }
     }

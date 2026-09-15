@@ -314,7 +314,7 @@ public sealed class BaselineManager
 
             string desiredDescription = entry.EnsureAbsent
                 ? "(absent)"
-                : $"{(entry.Kind == RegistryValueKind.MultiString ? string.Join('|', entry.Values) : entry.Value)} ({entry.Kind})";
+                : $"{(entry.ResolvedKind == RegistryValueKind.MultiString ? string.Join('|', entry.Values) : entry.Value)} ({entry.Kind})";
 
             if (firstReport && !IsLikelySelfEcho())
             {
@@ -350,7 +350,7 @@ public sealed class BaselineManager
                 return EntryOutcome.Failed;
             }
 
-            writableSet.SetValue(entry.Name, entry.ParseDesiredValue(), entry.Kind);
+            writableSet.SetValue(entry.Name, entry.ParseDesiredValue(), entry.ResolvedKind);
             Interlocked.Exchange(ref _lastSelfWriteTicks, Environment.TickCount64);
 
             _log.LogInformation("Enforced: {Id} set to {Desired}.", id, desiredDescription);
@@ -402,6 +402,6 @@ public sealed class BaselineManager
             return false;
         }
 
-        return RegistryHelpers.EqualsNorm(entry.Kind, entry.ParseDesiredValue(), actualKind, actual, _norm);
+        return RegistryHelpers.EqualsNorm(entry.ResolvedKind, entry.ParseDesiredValue(), actualKind, actual, _norm);
     }
 }

@@ -112,7 +112,7 @@ public static partial class RegFileParser
             {
                 result.Entries.Add(new BaselineEntry
                 {
-                    Scope = currentScope!.Value,
+                    Scope = currentScope!.Value.ToString(),
                     Path = currentPath,
                     Name = name,
                     EnsureAbsent = true,
@@ -128,10 +128,10 @@ public static partial class RegFileParser
 
             result.Entries.Add(new BaselineEntry
             {
-                Scope = currentScope!.Value,
+                Scope = currentScope!.Value.ToString(),
                 Path = currentPath,
                 Name = name,
-                Kind = kind,
+                Kind = kind.ToString(),
                 Value = value,
                 Values = values,
             });

@@ -20,10 +20,10 @@ public class RegFileParserTests
         RegFileParser.Result result = RegFileParser.Parse(Reg);
 
         BaselineEntry entry = Assert.Single(result.Entries);
-        Assert.Equal(BaselineScope.PerUser, entry.Scope);
+        Assert.Equal(BaselineScope.PerUser, entry.ResolvedScope);
         Assert.Equal(@"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced", entry.Path);
         Assert.Equal("HideFileExt", entry.Name);
-        Assert.Equal(RegistryValueKind.DWord, entry.Kind);
+        Assert.Equal(RegistryValueKind.DWord, entry.ResolvedKind);
         Assert.Empty(result.Skipped);
     }
 
@@ -40,7 +40,7 @@ public class RegFileParserTests
         RegFileParser.Result result = RegFileParser.Parse(Reg);
 
         BaselineEntry entry = Assert.Single(result.Entries);
-        Assert.Equal(BaselineScope.Machine, entry.Scope);
+        Assert.Equal(BaselineScope.Machine, entry.ResolvedScope);
         Assert.Equal(@"SOFTWARE\Policies\Microsoft\Windows\CloudContent", entry.Path);
     }
 
@@ -57,7 +57,7 @@ public class RegFileParserTests
         RegFileParser.Result result = RegFileParser.Parse(Reg);
 
         BaselineEntry entry = Assert.Single(result.Entries);
-        Assert.Equal(BaselineScope.Machine, entry.Scope);
+        Assert.Equal(BaselineScope.Machine, entry.ResolvedScope);
         Assert.Equal(@"SOFTWARE\Classes\.foo", entry.Path);
         Assert.Equal("", entry.Name);
         Assert.Equal("FooFile", entry.Value);
@@ -161,7 +161,7 @@ public class RegFileParserTests
         RegFileParser.Result result = RegFileParser.Parse(Reg);
 
         BaselineEntry entry = Assert.Single(result.Entries);
-        Assert.Equal(RegistryValueKind.DWord, entry.Kind);
+        Assert.Equal(RegistryValueKind.DWord, entry.ResolvedKind);
         Assert.Equal(255, Assert.IsType<int>(entry.ParseDesiredValue()));
     }
 
@@ -178,7 +178,7 @@ public class RegFileParserTests
         RegFileParser.Result result = RegFileParser.Parse(Reg);
 
         BaselineEntry entry = Assert.Single(result.Entries);
-        Assert.Equal(RegistryValueKind.Binary, entry.Kind);
+        Assert.Equal(RegistryValueKind.Binary, entry.ResolvedKind);
         Assert.Equal(new byte[] { 0xDE, 0xAD, 0xBE, 0xEF }, Assert.IsType<byte[]>(entry.ParseDesiredValue()));
     }
 
@@ -195,7 +195,7 @@ public class RegFileParserTests
         RegFileParser.Result result = RegFileParser.Parse(Reg);
 
         BaselineEntry entry = Assert.Single(result.Entries);
-        Assert.Equal(RegistryValueKind.ExpandString, entry.Kind);
+        Assert.Equal(RegistryValueKind.ExpandString, entry.ResolvedKind);
         Assert.Equal("%SystemRoot%", entry.Value);
     }
 
@@ -212,7 +212,7 @@ public class RegFileParserTests
         RegFileParser.Result result = RegFileParser.Parse(Reg);
 
         BaselineEntry entry = Assert.Single(result.Entries);
-        Assert.Equal(RegistryValueKind.MultiString, entry.Kind);
+        Assert.Equal(RegistryValueKind.MultiString, entry.ResolvedKind);
         Assert.Equal(["a", "b"], entry.Values);
     }
 
@@ -229,7 +229,7 @@ public class RegFileParserTests
         RegFileParser.Result result = RegFileParser.Parse(Reg);
 
         BaselineEntry entry = Assert.Single(result.Entries);
-        Assert.Equal(RegistryValueKind.QWord, entry.Kind);
+        Assert.Equal(RegistryValueKind.QWord, entry.ResolvedKind);
         Assert.Equal(42L, Assert.IsType<long>(entry.ParseDesiredValue()));
     }
 
@@ -316,7 +316,7 @@ public class RegFileParserTests
         RegFileParser.Result result = RegFileParser.Parse(Reg);
 
         BaselineEntry entry = Assert.Single(result.Entries);
-        Assert.Equal(RegistryValueKind.MultiString, entry.Kind);
+        Assert.Equal(RegistryValueKind.MultiString, entry.ResolvedKind);
         Assert.Equal(["a", "", "b"], entry.Values);
     }
 

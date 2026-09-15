@@ -67,12 +67,12 @@ public sealed class ServiceBaselineManager
             examined++;
 
             bool ok = true;
-            if (entry.StartType is { } startType)
+            if (entry.ResolvedStartType is { } startType)
             {
                 ok &= ApplyStartType(entry, startType, source);
             }
 
-            if (entry.RunState is { } runState)
+            if (entry.ResolvedRunState is { } runState)
             {
                 ok &= ApplyRunState(entry, runState);
             }

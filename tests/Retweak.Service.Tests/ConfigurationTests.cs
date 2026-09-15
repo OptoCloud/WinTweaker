@@ -16,7 +16,7 @@ public class ConfigurationTests
     [InlineData("-1", -1)]
     public void DWordValuesParseToExpectedBits(string configured, int expected)
     {
-        var entry = new BaselineEntry { Kind = RegistryValueKind.DWord, Value = configured };
+        var entry = new BaselineEntry { Kind = "DWord", Value = configured };
         Assert.Equal(expected, Assert.IsType<int>(entry.ParseDesiredValue()));
     }
 
@@ -25,7 +25,7 @@ public class ConfigurationTests
     [InlineData("-1", -1L)]
     public void QWordValuesParse(string configured, long expected)
     {
-        var entry = new BaselineEntry { Kind = RegistryValueKind.QWord, Value = configured };
+        var entry = new BaselineEntry { Kind = "QWord", Value = configured };
         Assert.Equal(expected, Assert.IsType<long>(entry.ParseDesiredValue()));
     }
 
@@ -35,14 +35,14 @@ public class ConfigurationTests
     [InlineData("de-ad-be-ef")]
     public void BinaryAcceptsSeparators(string configured)
     {
-        var entry = new BaselineEntry { Kind = RegistryValueKind.Binary, Value = configured };
+        var entry = new BaselineEntry { Kind = "Binary", Value = configured };
         Assert.Equal(new byte[] { 0xDE, 0xAD, 0xBE, 0xEF }, Assert.IsType<byte[]>(entry.ParseDesiredValue()));
     }
 
     [Fact]
     public void OddLengthBinaryIsRejected()
     {
-        var entry = new BaselineEntry { Kind = RegistryValueKind.Binary, Value = "abc" };
+        var entry = new BaselineEntry { Kind = "Binary", Value = "abc" };
         Assert.Throws<FormatException>(() => entry.ParseDesiredValue());
     }
 
@@ -53,7 +53,7 @@ public class ConfigurationTests
         {
             Path = @"HKLM:\SOFTWARE\Foo",
             Name = "Bar",
-            Kind = RegistryValueKind.DWord,
+            Kind = "DWord",
             Value = "1",
         };
 
@@ -66,10 +66,10 @@ public class ConfigurationTests
     {
         var entry = new BaselineEntry
         {
-            Scope = BaselineScope.PerUser,
+            Scope = "PerUser",
             Path = @"S-1-5-21-1-2-3-1001\Software\Foo",
             Name = "Bar",
-            Kind = RegistryValueKind.DWord,
+            Kind = "DWord",
             Value = "1",
         };
 
@@ -84,7 +84,7 @@ public class ConfigurationTests
         {
             Path = @"SOFTWARE\Foo",
             Name = "Bar",
-            Kind = RegistryValueKind.DWord,
+            Kind = "DWord",
             Value = "not-a-number",
         };
 
@@ -96,10 +96,10 @@ public class ConfigurationTests
     {
         var entry = new BaselineEntry
         {
-            Scope = BaselineScope.PerUser,
+            Scope = "PerUser",
             Path = @"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced",
             Name = "HideFileExt",
-            Kind = RegistryValueKind.DWord,
+            Kind = "DWord",
             Value = "0",
         };
 
@@ -160,8 +160,94 @@ public class ConfigurationTests
         Assert.Equal(2, options.Entries.Count);
         Assert.Single(options.MachineEntries);
         Assert.Single(options.PerUserEntries);
-        Assert.Equal(RegistryValueKind.String, options.PerUserEntries.First().Kind);
+        Assert.Equal(RegistryValueKind.String, options.PerUserEntries.First().ResolvedKind);
         Assert.All(options.Entries, e => Assert.True(e.TryValidate(out _)));
+    }
+
+    [Fact]
+    public void InvalidEnumStringSurvivesBindingAndFailsValidationInstead()
+    {
+        // Regression test: Kind/Scope/StartType/RunState are bound as raw strings
+        // specifically so that a typo like this does not vanish. Before that fix, binding
+        // a strongly-typed enum property to an unparseable string caused the configuration
+        // binder to silently drop the *entire array element* -- not just the bad property --
+        // so a mistyped Kind never reached TryValidate at all: Entries.Count came back one
+        // short, with no error, no warning, and no way to detect it short of counting.
+        const string Json = """
+        {
+          "Retweak": {
+            "Entries": [
+              { "Scope": "Machine", "Path": "SOFTWARE\\A", "Name": "X", "Kind": "NotARealKind", "Value": "1" },
+              { "Scope": "Machine", "Path": "SOFTWARE\\B", "Name": "Y", "Kind": "DWord", "Value": "1" }
+            ]
+          }
+        }
+        """;
+
+        IConfigurationRoot config = new ConfigurationBuilder()
+            .AddJsonStream(new MemoryStream(System.Text.Encoding.UTF8.GetBytes(Json)))
+            .Build();
+
+        RetweakOptions options = config.GetSection(RetweakOptions.SectionName).Get<RetweakOptions>()!;
+
+        // Both entries must still be present...
+        Assert.Equal(2, options.Entries.Count);
+
+        // ...and the bad one must fail validation with a message naming the actual culprit.
+        BaselineEntry bad = options.Entries.Single(e => e.Name == "X");
+        Assert.False(bad.TryValidate(out string error));
+        Assert.Contains("NotARealKind", error, StringComparison.Ordinal);
+
+        BaselineEntry good = options.Entries.Single(e => e.Name == "Y");
+        Assert.True(good.TryValidate(out string goodError), goodError);
+    }
+
+    [Fact]
+    public void InvalidScopeStringFailsValidationRatherThanVanishing()
+    {
+        const string Json = """
+        {
+          "Retweak": {
+            "Entries": [
+              { "Scope": "Machiine", "Path": "SOFTWARE\\A", "Name": "X", "Kind": "DWord", "Value": "1" }
+            ]
+          }
+        }
+        """;
+
+        IConfigurationRoot config = new ConfigurationBuilder()
+            .AddJsonStream(new MemoryStream(System.Text.Encoding.UTF8.GetBytes(Json)))
+            .Build();
+
+        RetweakOptions options = config.GetSection(RetweakOptions.SectionName).Get<RetweakOptions>()!;
+
+        BaselineEntry entry = Assert.Single(options.Entries);
+        Assert.False(entry.TryValidate(out string error));
+        Assert.Contains("Machiine", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void InvalidServiceStartTypeStringFailsValidationRatherThanVanishing()
+    {
+        const string Json = """
+        {
+          "Retweak": {
+            "ServiceEntries": [
+              { "Name": "DiagTrack", "StartType": "Disable" }
+            ]
+          }
+        }
+        """;
+
+        IConfigurationRoot config = new ConfigurationBuilder()
+            .AddJsonStream(new MemoryStream(System.Text.Encoding.UTF8.GetBytes(Json)))
+            .Build();
+
+        RetweakOptions options = config.GetSection(RetweakOptions.SectionName).Get<RetweakOptions>()!;
+
+        ServiceEntry entry = Assert.Single(options.ServiceEntries);
+        Assert.False(entry.TryValidate(out string error));
+        Assert.Contains("Disable", error, StringComparison.Ordinal);
     }
 
     [Fact]

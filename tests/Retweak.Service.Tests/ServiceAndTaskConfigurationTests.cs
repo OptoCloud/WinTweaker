@@ -9,7 +9,7 @@ public class ServiceAndTaskConfigurationTests
     [Fact]
     public void ServiceEntryRequiresName()
     {
-        var entry = new ServiceEntry { Name = "", StartType = ServiceStartMode.Disabled };
+        var entry = new ServiceEntry { Name = "", StartType = "Disabled" };
 
         Assert.False(entry.TryValidate(out string error));
         Assert.Contains("Name", error, StringComparison.OrdinalIgnoreCase);
@@ -27,7 +27,7 @@ public class ServiceAndTaskConfigurationTests
     [Fact]
     public void ServiceEntryWithOnlyStartTypeIsValid()
     {
-        var entry = new ServiceEntry { Name = "DiagTrack", StartType = ServiceStartMode.Disabled };
+        var entry = new ServiceEntry { Name = "DiagTrack", StartType = "Disabled" };
 
         Assert.True(entry.TryValidate(out string error), error);
     }
@@ -35,7 +35,7 @@ public class ServiceAndTaskConfigurationTests
     [Fact]
     public void ServiceEntryWithOnlyRunStateIsValid()
     {
-        var entry = new ServiceEntry { Name = "DiagTrack", RunState = DesiredServiceRunState.Stopped };
+        var entry = new ServiceEntry { Name = "DiagTrack", RunState = "Stopped" };
 
         Assert.True(entry.TryValidate(out string error), error);
     }

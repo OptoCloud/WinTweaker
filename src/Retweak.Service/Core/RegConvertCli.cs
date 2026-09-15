@@ -117,7 +117,7 @@ public static class RegConvertCli
     {
         var dict = new Dictionary<string, object?>
         {
-            ["Scope"] = e.Scope.ToString(),
+            ["Scope"] = e.Scope,
             ["Path"] = e.Path,
             ["Name"] = e.Name,
         };
@@ -128,8 +128,8 @@ public static class RegConvertCli
         }
         else
         {
-            dict["Kind"] = e.Kind.ToString();
-            if (e.Kind == RegistryValueKind.MultiString)
+            dict["Kind"] = e.Kind;
+            if (e.ResolvedKind == RegistryValueKind.MultiString)
             {
                 dict["Values"] = e.Values;
             }

@@ -4,6 +4,26 @@ using Microsoft.Win32;
 
 namespace Retweak.Service.Configuration;
 
+/// <summary>
+/// Parses config-facing enum fields that are bound as strings (see the comment on
+/// <see cref="BaselineEntry.Scope"/> for why). <see cref="Enum.TryParse{TEnum}(string, bool, out TEnum)"/>
+/// alone would accept an arbitrary numeric string for a value the enum never defines
+/// (e.g. "5" for a 3-member enum), so this also requires <see cref="Enum.IsDefined"/>.
+/// </summary>
+internal static class EnumConfig
+{
+    public static bool TryParseDefined<TEnum>(string? value, out TEnum result) where TEnum : struct, Enum
+    {
+        if (value is not null && Enum.TryParse(value, ignoreCase: true, out result) && Enum.IsDefined(result))
+        {
+            return true;
+        }
+
+        result = default;
+        return false;
+    }
+}
+
 public enum BaselineScope
 {
     /// <summary>Enforced once under HKEY_LOCAL_MACHINE.</summary>
@@ -18,7 +38,15 @@ public enum BaselineScope
 /// </summary>
 public sealed class BaselineEntry
 {
-    public BaselineScope Scope { get; set; } = BaselineScope.Machine;
+    /// <summary>
+    /// Bound as a raw string, not <see cref="BaselineScope"/> directly: the configuration
+    /// binder silently drops an entire list element (not just this property) when a
+    /// strongly-typed enum property fails to parse, which would defeat "bad entries fail
+    /// loudly" for exactly the typo this field exists to catch. Use <see cref="ResolvedScope"/>
+    /// to read the parsed value; <see cref="TryValidate"/> is what turns a bad string into a
+    /// startup failure instead of a silently vanished entry.
+    /// </summary>
+    public string Scope { get; set; } = nameof(BaselineScope.Machine);
 
     /// <summary>
     /// Sub-key path relative to the hive root. For <see cref="BaselineScope.PerUser"/>
@@ -29,7 +57,19 @@ public sealed class BaselineEntry
     /// <summary>Value name. Empty string means the key's default value.</summary>
     public string Name { get; set; } = "";
 
-    public RegistryValueKind Kind { get; set; } = RegistryValueKind.DWord;
+    /// <summary>
+    /// Bound as a raw string for the same reason as <see cref="Scope"/>. Use
+    /// <see cref="ResolvedKind"/> to read the parsed value.
+    /// </summary>
+    public string Kind { get; set; } = nameof(RegistryValueKind.DWord);
+
+    /// <summary>Parsed <see cref="Scope"/>, or <see cref="BaselineScope.Machine"/> if unparseable.</summary>
+    public BaselineScope ResolvedScope =>
+        EnumConfig.TryParseDefined(Scope, out BaselineScope scope) ? scope : BaselineScope.Machine;
+
+    /// <summary>Parsed <see cref="Kind"/>, or <see cref="RegistryValueKind.Unknown"/> if unparseable.</summary>
+    public RegistryValueKind ResolvedKind =>
+        EnumConfig.TryParseDefined(Kind, out RegistryValueKind kind) ? kind : RegistryValueKind.Unknown;
 
     /// <summary>
     /// Desired value in string form. DWord/QWord accept decimal or 0x-prefixed hex.
@@ -70,7 +110,7 @@ public sealed class BaselineEntry
     /// </summary>
     public object ParseDesiredValue()
     {
-        switch (Kind)
+        switch (ResolvedKind)
         {
             case RegistryValueKind.DWord:
                 return unchecked((int)ParseUInt32(Value));
@@ -99,6 +139,12 @@ public sealed class BaselineEntry
     /// </summary>
     public bool TryValidate(out string error)
     {
+        if (!EnumConfig.TryParseDefined(Scope, out BaselineScope scope))
+        {
+            error = $"Scope '{Scope}' is not valid (must be Machine or PerUser).";
+            return false;
+        }
+
         if (string.IsNullOrWhiteSpace(Path))
         {
             error = "Path is required.";
@@ -111,7 +157,7 @@ public sealed class BaselineEntry
             return false;
         }
 
-        if (Scope == BaselineScope.PerUser &&
+        if (scope == BaselineScope.PerUser &&
             Path.StartsWith("S-1-", StringComparison.OrdinalIgnoreCase))
         {
             error = $"PerUser path '{Path}' must not include the SID; it is prefixed automatically.";
@@ -230,15 +276,28 @@ public sealed class ServiceEntry
     /// Desired start type. Enforced by writing the Start value under
     /// HKLM\SYSTEM\CurrentControlSet\Services\{Name} directly, which is what SCM itself
     /// reads and what `sc.exe config` ultimately writes; it does not require opening a
-    /// handle to the service itself. Null means "don't enforce start type".
+    /// handle to the service itself. Null/absent means "don't enforce start type".
+    ///
+    /// Bound as a raw string, not <see cref="ServiceStartMode"/> directly: the same
+    /// silent-list-element-drop reason as <see cref="BaselineEntry.Scope"/> applies here.
+    /// Use <see cref="ResolvedStartType"/> to read the parsed value.
     /// </summary>
-    public ServiceStartMode? StartType { get; set; }
+    public string? StartType { get; set; }
 
     /// <summary>
     /// Desired running state, enforced via the Service Control Manager (start/stop).
-    /// Null means "don't enforce running state".
+    /// Null/absent means "don't enforce running state". Bound as a raw string for the same
+    /// reason as <see cref="StartType"/>; use <see cref="ResolvedRunState"/>.
     /// </summary>
-    public DesiredServiceRunState? RunState { get; set; }
+    public string? RunState { get; set; }
+
+    /// <summary>Parsed <see cref="StartType"/>, or null if unset or unparseable.</summary>
+    public ServiceStartMode? ResolvedStartType =>
+        EnumConfig.TryParseDefined(StartType, out ServiceStartMode v) ? v : null;
+
+    /// <summary>Parsed <see cref="RunState"/>, or null if unset or unparseable.</summary>
+    public DesiredServiceRunState? ResolvedRunState =>
+        EnumConfig.TryParseDefined(RunState, out DesiredServiceRunState v) ? v : null;
 
     public string DescribeAt() => $"Service\\{Name}";
 
@@ -253,6 +312,18 @@ public sealed class ServiceEntry
         if (StartType is null && RunState is null)
         {
             error = $"Service '{Name}' has neither StartType nor RunState set; nothing to enforce.";
+            return false;
+        }
+
+        if (StartType is not null && ResolvedStartType is null)
+        {
+            error = $"Service '{Name}': StartType '{StartType}' is not valid (Boot, System, Automatic, Manual, Disabled).";
+            return false;
+        }
+
+        if (RunState is not null && ResolvedRunState is null)
+        {
+            error = $"Service '{Name}': RunState '{RunState}' is not valid (Running, Stopped).";
             return false;
         }
 
@@ -355,10 +426,10 @@ public sealed class RetweakOptions
     public List<ScheduledTaskEntry> ScheduledTaskEntries { get; set; } = [];
 
     public IEnumerable<BaselineEntry> MachineEntries =>
-        Entries.Where(e => e.Scope == BaselineScope.Machine);
+        Entries.Where(e => e.ResolvedScope == BaselineScope.Machine);
 
     public IEnumerable<BaselineEntry> PerUserEntries =>
-        Entries.Where(e => e.Scope == BaselineScope.PerUser);
+        Entries.Where(e => e.ResolvedScope == BaselineScope.PerUser);
 
     public TimeSpan Debounce => TimeSpan.FromMilliseconds(Math.Max(0, DebounceMilliseconds));
 

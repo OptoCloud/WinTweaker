@@ -49,6 +49,29 @@ function Write-Step([string] $Message) {
     Write-Host "==> $Message" -ForegroundColor Cyan
 }
 
+# sc.exe wants "option= value" as literal text with a single space after '=', and its
+# own argument parser is naive about quoting. Windows PowerShell 5.1's native-argument
+# encoder (pwsh 7 does not have this bug) can re-quote an array element that already
+# contains a quoted path-with-spaces, producing a doubly-quoted, invalid command line
+# (sc create then fails with exit code 1639). Routing through a temp .cmd file sidesteps
+# PowerShell's argument encoding entirely: cmd.exe parses the literal text itself, the
+# same as if it had been typed at a prompt, with none of that re-quoting.
+function Invoke-Sc([string] $ArgumentText) {
+    $tempBat = Join-Path ([System.IO.Path]::GetTempPath()) "retweak-sc-$([Guid]::NewGuid()).cmd"
+    try {
+        Set-Content -LiteralPath $tempBat -Value "@echo off`r`nsc.exe $ArgumentText" -Encoding ASCII
+        # Out-Null is load-bearing, not cosmetic: without it, cmd's stdout lines are
+        # collected into this function's own pipeline output alongside the `return`
+        # below, so a caller doing `$code = Invoke-Sc ...` gets a garbled array
+        # instead of a clean exit code.
+        & cmd.exe /c $tempBat | Out-Null
+        return $LASTEXITCODE
+    }
+    finally {
+        Remove-Item -LiteralPath $tempBat -Force -ErrorAction SilentlyContinue
+    }
+}
+
 # --- validate input ---------------------------------------------------------
 
 $SourcePath = (Resolve-Path -LiteralPath $SourcePath).Path
@@ -80,7 +103,7 @@ if ($existing) {
         Start-Sleep -Seconds 3
     }
 
-    & sc.exe delete $ServiceName | Out-Null
+    Invoke-Sc "delete ""$ServiceName""" | Out-Null
 
     # SCM keeps the entry until every handle closes; wait for it to disappear.
     $deadline = (Get-Date).AddSeconds(30)
@@ -116,31 +139,23 @@ else {
 Write-Step "Creating service '$ServiceName'"
 $binPath = '"{0}"' -f $exePath
 
-$scArgs = @(
-    'create', $ServiceName,
-    "binPath= $binPath",
-    "DisplayName= $DisplayName",
-    'start= auto',
-    "obj= $Account"
-)
-
-& sc.exe @scArgs | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    throw "sc create failed with exit code $LASTEXITCODE."
+$createExitCode = Invoke-Sc "create ""$ServiceName"" binPath= $binPath DisplayName= ""$DisplayName"" start= auto obj= ""$Account"""
+if ($createExitCode -ne 0) {
+    throw "sc create failed with exit code $createExitCode."
 }
 
-& sc.exe description $ServiceName 'Keeps a configured registry baseline enforced, reacting to changes as they happen.' | Out-Null
+Invoke-Sc "description ""$ServiceName"" ""Keeps a configured registry baseline enforced, reacting to changes as they happen.""" | Out-Null
 
 # --- recovery ---------------------------------------------------------------
 # reset= 86400 means the failure count returns to zero after a day without incident.
 # Three restart actions at 60 s; the third also applies to all subsequent failures.
 
 Write-Step "Configuring recovery actions"
-& sc.exe failure $ServiceName reset= 86400 actions= restart/60000/restart/60000/restart/60000 | Out-Null
+Invoke-Sc "failure ""$ServiceName"" reset= 86400 actions= restart/60000/restart/60000/restart/60000" | Out-Null
 
 # Treat a non-zero exit code as a failure, not just a crash. Without this, a clean
 # process exit with a bad status is not retried.
-& sc.exe failureflag $ServiceName 1 | Out-Null
+Invoke-Sc "failureflag ""$ServiceName"" 1" | Out-Null
 
 # --- optional safe mode -----------------------------------------------------
 

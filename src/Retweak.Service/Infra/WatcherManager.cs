@@ -75,6 +75,11 @@ public sealed class WatcherManager : IDisposable
                 return;
             }
 
+            // Drop watchers that stopped watching (a failed re-arm) so a wanted key that
+            // still has a stale entry here gets recreated instead of staying uncovered
+            // forever.
+            _machineWatchers.RemoveAll(w => !w.IsAlive);
+
             var wanted = _options.MachineEntries
                 .Where(e => e.Watch)
                 .Select(e => e.Path)
@@ -96,9 +101,10 @@ public sealed class WatcherManager : IDisposable
 
     /// <summary>
     /// Adds watchers for hives that appeared and removes watchers for hives that went away.
-    /// Returns the SIDs newly added, so the caller can apply the baseline to them at once.
+    /// Returns the SIDs newly added, so the caller can apply the baseline to them at once,
+    /// and the SIDs removed, so the caller can drop their drift bookkeeping.
     /// </summary>
-    public IReadOnlyList<string> ReconcileUserWatchers()
+    public (IReadOnlyList<string> Added, IReadOnlyList<string> Removed) ReconcileUserWatchers()
     {
         IReadOnlyList<string> loaded;
         try
@@ -108,17 +114,18 @@ public sealed class WatcherManager : IDisposable
         catch (Exception ex)
         {
             _log.LogError(ex, "Could not enumerate HKEY_USERS.");
-            return [];
+            return ([], []);
         }
 
         var added = new List<string>();
+        var removed = new List<string>();
         List<RegistryWatcher> toDispose = [];
 
         lock (_gate)
         {
             if (_disposed)
             {
-                return [];
+                return ([], []);
             }
 
             var loadedSet = new HashSet<string>(loaded, StringComparer.OrdinalIgnoreCase);
@@ -127,7 +134,21 @@ public sealed class WatcherManager : IDisposable
             {
                 toDispose.AddRange(_userWatchers[sid]);
                 _userWatchers.Remove(sid);
+                removed.Add(sid);
                 _log.LogInformation("Hive for {Sid} unloaded; watchers removed.", sid);
+            }
+
+            // Prune watchers that stopped watching (a failed re-arm) so a still-loaded SID
+            // with a stale entry gets its watchers recreated instead of staying uncovered.
+            foreach (string sid in _userWatchers.Keys.ToList())
+            {
+                List<RegistryWatcher> list = _userWatchers[sid];
+                int before = list.Count;
+                list.RemoveAll(w => !w.IsAlive);
+                if (list.Count == 0 && before > 0)
+                {
+                    _userWatchers.Remove(sid);
+                }
             }
 
             foreach (string sid in loaded)
@@ -159,30 +180,7 @@ public sealed class WatcherManager : IDisposable
             w.Dispose();
         }
 
-        return added;
-    }
-
-    /// <summary>
-    /// Explicitly drops a SID's watchers, used on logoff so handles are released promptly
-    /// rather than at the next reconcile tick.
-    /// </summary>
-    public void RemoveUser(string sid)
-    {
-        List<RegistryWatcher>? watchers;
-        lock (_gate)
-        {
-            if (!_userWatchers.Remove(sid, out watchers))
-            {
-                return;
-            }
-        }
-
-        foreach (RegistryWatcher w in watchers)
-        {
-            w.Dispose();
-        }
-
-        _log.LogInformation("Removed {Count} watcher(s) for {Sid}.", watchers.Count, sid);
+        return (added, removed);
     }
 
     private List<RegistryWatcher> CreateUserWatchers(string sid)

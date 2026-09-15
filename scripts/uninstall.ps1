@@ -57,7 +57,14 @@ if ($service) {
 
         # Disable first so SCM recovery does not restart it the moment it dies.
         & sc.exe config $ServiceName start= disabled | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "sc config start=disabled failed with exit code $LASTEXITCODE."
+        }
+
         & sc.exe failure $ServiceName reset= 0 actions= '' | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "sc failure reset failed with exit code $LASTEXITCODE."
+        }
 
         Get-CimInstance Win32_Service -Filter "Name='$ServiceName'" |
             Where-Object { $_.ProcessId -gt 0 } |
@@ -67,10 +74,17 @@ if ($service) {
 
     Write-Step "Deleting service"
     & sc.exe delete $ServiceName | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "sc delete failed with exit code $LASTEXITCODE; the service may still be registered."
+    }
 
     $deadline = (Get-Date).AddSeconds(30)
     while ((Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) {
         Start-Sleep -Milliseconds 500
+    }
+
+    if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) {
+        Write-Warning "Service $ServiceName is still registered after waiting; it was not fully removed."
     }
 }
 else {
@@ -113,4 +127,9 @@ if ($RemoveLogs) {
 }
 
 Write-Host ""
-Write-Host "Retweak removed. Enforced registry values were left as they are." -ForegroundColor Green
+if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) {
+    Write-Warning "Retweak service is still registered; see the warnings above. Other cleanup steps still ran."
+}
+else {
+    Write-Host "Retweak removed. Enforced registry values were left as they are." -ForegroundColor Green
+}

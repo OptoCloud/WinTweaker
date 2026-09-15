@@ -83,7 +83,7 @@ public sealed class BaselineWorker : BackgroundService
         ApplyServicesAndScheduledTasks("startup");
 
         _watchers.EnsureMachineWatchers();
-        foreach (string sid in _watchers.ReconcileUserWatchers())
+        foreach (string sid in ReconcileAndForget().Added)
         {
             _baseline.ApplyForUser(sid, "startup-hive");
         }
@@ -91,7 +91,7 @@ public sealed class BaselineWorker : BackgroundService
         // A second reconcile catches keys that the initial pass had to create: a watcher
         // cannot be armed on a key that did not exist a moment ago.
         _watchers.EnsureMachineWatchers();
-        _watchers.ReconcileUserWatchers();
+        ReconcileAndForget();
 
         _log.LogInformation("Enforcement active with {Count} watcher(s).", _watchers.WatcherCount);
 
@@ -169,7 +169,27 @@ public sealed class BaselineWorker : BackgroundService
 
             // A change may have created a key we could not previously watch.
             _watchers.EnsureMachineWatchers();
+            foreach (string sid in ReconcileAndForget().Added)
+            {
+                _baseline.ApplyForUser(sid, $"watch:{source}");
+            }
         }
+    }
+
+    /// <summary>
+    /// Reconciles user watchers and drops drift bookkeeping for any SID whose hive just
+    /// unloaded, so a user who logs back in gets a fresh "drift detected" line rather than
+    /// permanent silence.
+    /// </summary>
+    private (IReadOnlyList<string> Added, IReadOnlyList<string> Removed) ReconcileAndForget()
+    {
+        var result = _watchers.ReconcileUserWatchers();
+        foreach (string sid in result.Removed)
+        {
+            _baseline.ForgetUser(sid);
+        }
+
+        return result;
     }
 
     private async Task SessionLoopAsync(CancellationToken stoppingToken)
@@ -182,7 +202,7 @@ public sealed class BaselineWorker : BackgroundService
                 // usually still loaded and may stay loaded for a while. Reconciliation
                 // removes them once the hive is genuinely gone.
                 _log.LogDebug("Logoff on session {Session}; deferring watcher cleanup to reconcile.", evt.SessionId);
-                _watchers.ReconcileUserWatchers();
+                ReconcileAndForget();
                 continue;
             }
 
@@ -206,7 +226,7 @@ public sealed class BaselineWorker : BackgroundService
                 if (UserHives.IsUserSid(sid) && UserHives.IsHiveUsable(RegistryHelpers.NativeView, sid))
                 {
                     PassReport report = _baseline.ApplyForUser(sid, "logon");
-                    _watchers.ReconcileUserWatchers();
+                    ReconcileAndForget();
                     _log.LogInformation(
                         "Logon session {Session} ({Sid}): {Checked} checked, {Repaired} repaired.",
                         evt.SessionId, sid, report.Checked, report.Repaired);
@@ -217,7 +237,7 @@ public sealed class BaselineWorker : BackgroundService
             {
                 // No SID resolved: fall back to diffing HKU. Any hive that showed up is
                 // almost certainly the one that just logged on.
-                IReadOnlyList<string> added = _watchers.ReconcileUserWatchers();
+                IReadOnlyList<string> added = ReconcileAndForget().Added;
                 if (added.Count > 0)
                 {
                     foreach (string newSid in added)
@@ -225,7 +245,7 @@ public sealed class BaselineWorker : BackgroundService
                         _baseline.ApplyForUser(newSid, "logon-reconcile");
                     }
 
-                    _watchers.ReconcileUserWatchers();
+                    ReconcileAndForget();
                     _log.LogInformation(
                         "Logon session {Session}: applied baseline to {Count} newly loaded hive(s).",
                         evt.SessionId, added.Count);
@@ -249,7 +269,7 @@ public sealed class BaselineWorker : BackgroundService
 
         while (await reconcileTimer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
         {
-            foreach (string sid in _watchers.ReconcileUserWatchers())
+            foreach (string sid in ReconcileAndForget().Added)
             {
                 _baseline.ApplyForUser(sid, "reconcile");
             }

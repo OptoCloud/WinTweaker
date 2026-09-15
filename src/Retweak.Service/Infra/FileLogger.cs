@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using Microsoft.Extensions.Logging;
 
@@ -18,7 +19,6 @@ public sealed class FileLoggerProvider : ILoggerProvider
     private readonly string _baseName;
     private readonly long _maxBytes;
     private readonly int _retain;
-    private bool _broken;
 
     public FileLoggerProvider(string directory, string baseName, long maxBytes, int retain)
     {
@@ -36,11 +36,6 @@ public sealed class FileLoggerProvider : ILoggerProvider
 
     internal void Write(string line)
     {
-        if (_broken)
-        {
-            return;
-        }
-
         lock (_gate)
         {
             try
@@ -59,8 +54,9 @@ public sealed class FileLoggerProvider : ILoggerProvider
             catch
             {
                 // If we cannot even write the fallback log there is nowhere left to
-                // complain to. Stop trying rather than throwing on every log call.
-                _broken = true;
+                // complain to. Drop this line and let the next write try again, so a
+                // transient failure (e.g. a momentary AV lock) does not silence logging
+                // for the rest of the process lifetime.
             }
         }
     }
@@ -113,7 +109,7 @@ public sealed class FileLoggerProvider : ILoggerProvider
             }
 
             var sb = new StringBuilder(256);
-            sb.Append(DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss.fff zzz"))
+            sb.Append(DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss.fff zzz", CultureInfo.InvariantCulture))
               .Append(" [").Append(Abbreviate(logLevel)).Append("] ")
               .Append(ShortCategory(_category)).Append(": ")
               .Append(formatter(state, exception));

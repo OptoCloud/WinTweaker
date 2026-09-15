@@ -49,6 +49,13 @@ internal sealed class RegistryWatcher : IDisposable
     public string Description { get; }
 
     /// <summary>
+    /// False once the watcher has stopped watching, whether because it was disposed or
+    /// because it could not re-arm. The owner should prune dead watchers so a later
+    /// reconcile can recreate one for the same key instead of leaving it uncovered forever.
+    /// </summary>
+    public bool IsAlive => !_disposed;
+
+    /// <summary>
     /// Arbitrary tag the owner can use to correlate the watcher back to a SID.
     /// </summary>
     public string? Tag { get; init; }
@@ -92,15 +99,26 @@ internal sealed class RegistryWatcher : IDisposable
         const int Filter = NativeMethods.REG_NOTIFY_CHANGE_LAST_SET |
                            NativeMethods.REG_NOTIFY_THREAD_AGNOSTIC;
 
-        var watcher = new RegistryWatcher(hKey, description, Filter, onChanged, log) { Tag = tag };
-        if (!watcher.Arm())
+        try
         {
-            watcher.Dispose();
-            return null;
-        }
+            var watcher = new RegistryWatcher(hKey, description, Filter, onChanged, log) { Tag = tag };
+            if (!watcher.Arm())
+            {
+                watcher.Dispose();
+                return null;
+            }
 
-        log.LogDebug("Watching {Key}.", description);
-        return watcher;
+            log.LogDebug("Watching {Key}.", description);
+            return watcher;
+        }
+        catch
+        {
+            // If anything between the successful RegOpenKeyEx above and a fully
+            // constructed, armed watcher throws, there is no watcher object yet whose
+            // Dispose would close this handle for us.
+            NativeMethods.RegCloseKey(hKey);
+            throw;
+        }
     }
 
     /// <summary>
@@ -174,7 +192,14 @@ internal sealed class RegistryWatcher : IDisposable
 
         if (!Arm() && !_disposed)
         {
-            _log.LogWarning("Watcher for {Key} could not re-arm and is now inactive.", Description);
+            _log.LogWarning(
+                "Watcher for {Key} could not re-arm; releasing its handle. The audit will still cover it until reconcile creates a fresh watcher.",
+                Description);
+
+            // Arm() already logged the reason. Dispose closes the now-useless key handle
+            // instead of leaking it, and marks the watcher dead so the owner's next
+            // reconcile prunes it and can try to recreate it.
+            Dispose();
         }
     }
 

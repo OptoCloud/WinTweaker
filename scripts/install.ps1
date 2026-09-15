@@ -53,23 +53,25 @@ function Write-Step([string] $Message) {
 # own argument parser is naive about quoting. Windows PowerShell 5.1's native-argument
 # encoder (pwsh 7 does not have this bug) can re-quote an array element that already
 # contains a quoted path-with-spaces, producing a doubly-quoted, invalid command line
-# (sc create then fails with exit code 1639). Routing through a temp .cmd file sidesteps
-# PowerShell's argument encoding entirely: cmd.exe parses the literal text itself, the
-# same as if it had been typed at a prompt, with none of that re-quoting.
-function Invoke-Sc([string] $ArgumentText) {
-    $tempBat = Join-Path ([System.IO.Path]::GetTempPath()) "retweak-sc-$([Guid]::NewGuid()).cmd"
-    try {
-        Set-Content -LiteralPath $tempBat -Value "@echo off`r`nsc.exe $ArgumentText" -Encoding ASCII
-        # Out-Null is load-bearing, not cosmetic: without it, cmd's stdout lines are
-        # collected into this function's own pipeline output alongside the `return`
-        # below, so a caller doing `$code = Invoke-Sc ...` gets a garbled array
-        # instead of a clean exit code.
-        & cmd.exe /c $tempBat | Out-Null
-        return $LASTEXITCODE
+# (sc create then fails with exit code 1639). Building the command line ourselves via
+# ProcessStartInfo.ArgumentList sidesteps that encoder entirely: .NET quotes each element
+# using the correct Win32 argv rules, and because no shell is involved, values are never
+# re-interpreted for metacharacters (&, |, ^, %, etc.) the way routing them through
+# cmd.exe would.
+function Invoke-Sc([string[]] $Arguments) {
+    $psi = [System.Diagnostics.ProcessStartInfo]::new('sc.exe')
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    foreach ($arg in $Arguments) {
+        $psi.ArgumentList.Add($arg)
     }
-    finally {
-        Remove-Item -LiteralPath $tempBat -Force -ErrorAction SilentlyContinue
-    }
+
+    $proc = [System.Diagnostics.Process]::Start($psi)
+    $proc.StandardOutput.ReadToEnd() | Out-Null
+    $proc.StandardError.ReadToEnd() | Out-Null
+    $proc.WaitForExit()
+    return $proc.ExitCode
 }
 
 # --- validate input ---------------------------------------------------------
@@ -86,11 +88,11 @@ $exePath = Join-Path $InstallPath 'Retweak.Service.exe'
 
 $existing = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 if ($existing) {
-    Write-Step "Existing service found; stopping and removing it first."
+    Write-Step "Existing service found; stopping it first."
 
     # CanStop=false makes Stop-Service fail. That is the documented trade-off of
-    # RefuseStop; the upgrade path in that case is to kill the process and delete
-    # the service, which is what this does.
+    # RefuseStop; the upgrade path in that case is to kill the process, which is
+    # what this does.
     try {
         Stop-Service -Name $ServiceName -Force -ErrorAction Stop
         (Get-Service -Name $ServiceName).WaitForStatus('Stopped', '00:00:30')
@@ -102,17 +104,12 @@ if ($existing) {
             ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
         Start-Sleep -Seconds 3
     }
-
-    Invoke-Sc "delete ""$ServiceName""" | Out-Null
-
-    # SCM keeps the entry until every handle closes; wait for it to disappear.
-    $deadline = (Get-Date).AddSeconds(30)
-    while ((Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) {
-        Start-Sleep -Milliseconds 500
-    }
 }
 
 # --- copy files -------------------------------------------------------------
+# Deliberately done before the old service registration is deleted below: if the copy
+# fails partway (locked file, disk full), the previous install is left stopped but still
+# registered and recoverable, rather than the machine ending up with no service at all.
 
 Write-Step "Installing to $InstallPath"
 New-Item -ItemType Directory -Path $InstallPath -Force | Out-Null
@@ -120,6 +117,19 @@ Copy-Item -Path (Join-Path $SourcePath '*') -Destination $InstallPath -Recurse -
 
 $logDir = Join-Path $env:ProgramData 'Retweak\logs'
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+
+# --- remove previous service registration -----------------------------------
+
+if ($existing) {
+    Write-Step "Removing previous service registration"
+    Invoke-Sc @('delete', $ServiceName) | Out-Null
+
+    # SCM keeps the entry until every handle closes; wait for it to disappear.
+    $deadline = (Get-Date).AddSeconds(30)
+    while ((Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) {
+        Start-Sleep -Milliseconds 500
+    }
+}
 
 # --- event log source -------------------------------------------------------
 # Created here rather than at runtime: source creation requires administrator rights the
@@ -137,25 +147,37 @@ else {
 # --- create service ---------------------------------------------------------
 
 Write-Step "Creating service '$ServiceName'"
-$binPath = '"{0}"' -f $exePath
 
-$createExitCode = Invoke-Sc "create ""$ServiceName"" binPath= $binPath DisplayName= ""$DisplayName"" start= auto obj= ""$Account"""
+$createExitCode = Invoke-Sc @(
+    'create', $ServiceName,
+    'binPath=', $exePath,
+    'DisplayName=', $DisplayName,
+    'start=', 'auto',
+    'obj=', $Account
+)
 if ($createExitCode -ne 0) {
     throw "sc create failed with exit code $createExitCode."
 }
 
-Invoke-Sc "description ""$ServiceName"" ""Keeps a configured registry baseline enforced, reacting to changes as they happen.""" | Out-Null
+Invoke-Sc @(
+    'description', $ServiceName,
+    'Keeps a configured registry baseline enforced, reacting to changes as they happen.'
+) | Out-Null
 
 # --- recovery ---------------------------------------------------------------
 # reset= 86400 means the failure count returns to zero after a day without incident.
 # Three restart actions at 60 s; the third also applies to all subsequent failures.
 
 Write-Step "Configuring recovery actions"
-Invoke-Sc "failure ""$ServiceName"" reset= 86400 actions= restart/60000/restart/60000/restart/60000" | Out-Null
+Invoke-Sc @(
+    'failure', $ServiceName,
+    'reset=', '86400',
+    'actions=', 'restart/60000/restart/60000/restart/60000'
+) | Out-Null
 
 # Treat a non-zero exit code as a failure, not just a crash. Without this, a clean
 # process exit with a bad status is not retried.
-Invoke-Sc "failureflag ""$ServiceName"" 1" | Out-Null
+Invoke-Sc @('failureflag', $ServiceName, '1') | Out-Null
 
 # --- optional safe mode -----------------------------------------------------
 

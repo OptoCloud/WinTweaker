@@ -74,6 +74,19 @@ public static partial class RegFileParser
                     continue;
                 }
 
+                if (currentPath.Length == 0)
+                {
+                    // A section for the hive root itself, e.g. "[HKEY_LOCAL_MACHINE]" with
+                    // no subkey. Every BaselineEntry needs a non-empty Path, so converting
+                    // this would only produce an entry guaranteed to fail validation at
+                    // service startup; report it the same way as any other unsupported
+                    // construct instead of emitting a value with no key to hold it.
+                    result.Skipped.Add(new SkippedItem(lineNumber, trimmed,
+                        "Section names the hive root with no subkey; there is nowhere to attach a value."));
+                    currentSectionUsable = false;
+                    continue;
+                }
+
                 currentSectionUsable = true;
                 continue;
             }
@@ -234,9 +247,9 @@ public static partial class RegFileParser
         if (rawValue.StartsWith("hex(2):", StringComparison.OrdinalIgnoreCase))
         {
             byte[]? bytes = TryParseHexBytes(rawValue["hex(2):".Length..]);
-            if (bytes is null)
+            if (bytes is null || bytes.Length % 2 != 0)
             {
-                error = "hex(2): (EXPAND_SZ) value has malformed hex bytes.";
+                error = "hex(2): (EXPAND_SZ) value has malformed hex bytes: must decode to a whole number of UTF-16 code units.";
                 return false;
             }
 
@@ -248,9 +261,9 @@ public static partial class RegFileParser
         if (rawValue.StartsWith("hex(7):", StringComparison.OrdinalIgnoreCase))
         {
             var bytes = TryParseHexBytes(rawValue["hex(7):".Length..]);
-            if (bytes is null)
+            if (bytes is null || bytes.Length % 2 != 0)
             {
-                error = "hex(7): (MULTI_SZ) value has malformed hex bytes.";
+                error = "hex(7): (MULTI_SZ) value has malformed hex bytes: must decode to a whole number of UTF-16 code units.";
                 return false;
             }
 
@@ -306,6 +319,36 @@ public static partial class RegFileParser
         return nul >= 0 ? s[..nul] : s;
     }
 
-    private static string[] DecodeUtf16MultiZ(byte[] bytes) =>
-        [.. Encoding.Unicode.GetString(bytes).Split('\0', StringSplitOptions.RemoveEmptyEntries)];
+    /// <summary>
+    /// A REG_MULTI_SZ is a sequence of null-terminated strings followed by one extra null
+    /// that terminates the whole list, so the raw bytes always end in a double null:
+    /// splitting on '\0' therefore always yields exactly two trailing empty segments that
+    /// are not real entries. <see cref="StringSplitOptions.RemoveEmptyEntries"/> would also
+    /// remove a genuine empty string from the middle of the list, so those two artifacts
+    /// are trimmed explicitly instead.
+    /// </summary>
+    private static string[] DecodeUtf16MultiZ(byte[] bytes)
+    {
+        string[] parts = Encoding.Unicode.GetString(bytes).Split('\0');
+
+        int end = parts.Length;
+        if (end > 0 && parts[end - 1].Length == 0)
+        {
+            end--;
+        }
+
+        if (end > 0 && parts[end - 1].Length == 0)
+        {
+            end--;
+        }
+
+        // A single leftover empty entry is indistinguishable on the wire from an empty
+        // list (both encode as just the list terminator), so treat it as no entries.
+        if (end == 1 && parts[0].Length == 0)
+        {
+            end = 0;
+        }
+
+        return parts[..end];
+    }
 }

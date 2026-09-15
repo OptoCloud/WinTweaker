@@ -301,4 +301,54 @@ public class RegFileParserTests
         Assert.Empty(result.Entries);
         Assert.Single(result.Skipped);
     }
+
+    [Fact]
+    public void HexMultiStringPreservesEmbeddedEmptyString()
+    {
+        // a, "", b — the middle empty string must survive, not just the terminator.
+        const string Reg = """
+        Windows Registry Editor Version 5.00
+
+        [HKEY_LOCAL_MACHINE\SOFTWARE\Foo]
+        "Bar"=hex(7):61,00,00,00,00,00,62,00,00,00,00,00
+        """;
+
+        RegFileParser.Result result = RegFileParser.Parse(Reg);
+
+        BaselineEntry entry = Assert.Single(result.Entries);
+        Assert.Equal(RegistryValueKind.MultiString, entry.Kind);
+        Assert.Equal(["a", "", "b"], entry.Values);
+    }
+
+    [Fact]
+    public void HexTypeWithOddByteCountIsSkipped()
+    {
+        const string Reg = """
+        Windows Registry Editor Version 5.00
+
+        [HKEY_LOCAL_MACHINE\SOFTWARE\Foo]
+        "Bar"=hex(2):41,00,42
+        """;
+
+        RegFileParser.Result result = RegFileParser.Parse(Reg);
+
+        Assert.Empty(result.Entries);
+        Assert.Single(result.Skipped);
+    }
+
+    [Fact]
+    public void RootHiveSectionWithNoSubkeyIsSkipped()
+    {
+        const string Reg = """
+        Windows Registry Editor Version 5.00
+
+        [HKEY_LOCAL_MACHINE]
+        "Bar"=dword:00000001
+        """;
+
+        RegFileParser.Result result = RegFileParser.Parse(Reg);
+
+        Assert.Empty(result.Entries);
+        Assert.Single(result.Skipped);
+    }
 }

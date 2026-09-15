@@ -29,14 +29,35 @@ HostApplicationBuilder builder = Host.CreateApplicationBuilder(args);
 string exeDir = AppContext.BaseDirectory;
 builder.Environment.ContentRootPath = exeDir;
 
-builder.Configuration.Sources.Clear();
-builder.Configuration
-    .SetBasePath(exeDir)
-    .AddJsonFile("appsettings.json", optional: false, reloadOnChange: false)
-    .AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true, reloadOnChange: false)
-    .AddRegistryOverrides(RegistryConfigPath, RetweakOptions.SectionName, RegistryHelpers.NativeView)
-    .AddEnvironmentVariables("RETWEAK_")
-    .AddCommandLine(args);
+// The file log is always present, and is the only thing that can report a failure that
+// happens before, or because of, the Event Log source being missing. Config loading and
+// binding can itself throw (malformed JSON, a bad enum string in a registry override), so
+// it runs under its own emergency logger rather than the one built from its own output.
+RetweakOptions bootOptions;
+try
+{
+    builder.Configuration.Sources.Clear();
+    builder.Configuration
+        .SetBasePath(exeDir)
+        .AddJsonFile("appsettings.json", optional: false, reloadOnChange: false)
+        .AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true, reloadOnChange: false)
+        .AddRegistryOverrides(RegistryConfigPath, RetweakOptions.SectionName, RegistryHelpers.NativeView)
+        .AddEnvironmentVariables("RETWEAK_")
+        .AddCommandLine(args);
+
+    bootOptions =
+        builder.Configuration.GetSection(RetweakOptions.SectionName).Get<RetweakOptions>() ?? new RetweakOptions();
+}
+catch (Exception ex)
+{
+    var emergency = new FileLoggerProvider(
+        new RetweakOptions().LogDirectory,
+        "retweak",
+        new RetweakOptions().LogFileMaxBytes,
+        new RetweakOptions().LogFileRetainCount);
+    emergency.CreateLogger("Startup").LogCritical(ex, "Fatal error loading configuration during startup");
+    throw;
+}
 
 builder.Services
     .AddOptions<RetweakOptions>()
@@ -48,11 +69,6 @@ builder.Services.Configure<ServiceControlOptions>(
     builder.Configuration.GetSection(ServiceControlOptions.SectionName));
 
 // ---- logging ---------------------------------------------------------------
-// The file log is always present. It is the only thing that can report a failure that
-// happens before, or because of, the Event Log source being missing.
-RetweakOptions bootOptions =
-    builder.Configuration.GetSection(RetweakOptions.SectionName).Get<RetweakOptions>() ?? new RetweakOptions();
-
 builder.Logging.ClearProviders();
 builder.Logging.AddProvider(new FileLoggerProvider(
     bootOptions.LogDirectory,

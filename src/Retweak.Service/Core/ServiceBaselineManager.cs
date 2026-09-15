@@ -36,6 +36,16 @@ public sealed class ServiceBaselineManager
         actual is int current && current == (int)desired;
 
     /// <summary>
+    /// Pure compliance check for the "Automatic (Delayed Start)" flag, which lives in a
+    /// separate DWORD alongside Start and is otherwise invisible to <see cref="IsStartTypeCompliant"/>:
+    /// a service left in delayed-auto state reads as plain Automatic and would never be
+    /// corrected without this. <see cref="ServiceStartMode.Automatic"/> here always means the
+    /// non-delayed form, since the config schema has no way to request delayed start.
+    /// </summary>
+    internal static bool IsDelayedAutostartCompliant(object? actual, ServiceStartMode desired) =>
+        desired != ServiceStartMode.Automatic || actual is not int flag || flag == 0;
+
+    /// <summary>
     /// Pure compliance check for a service's running state, split out from
     /// <see cref="ApplyRunState"/> so it is testable without a live SCM.
     /// </summary>
@@ -99,16 +109,33 @@ public sealed class ServiceBaselineManager
             }
 
             object? actual = key.GetValue("Start");
-            if (IsStartTypeCompliant(actual, desired))
+            object? delayedActual = key.GetValue("DelayedAutostart");
+            bool startCompliant = IsStartTypeCompliant(actual, desired);
+            bool delayCompliant = IsDelayedAutostartCompliant(delayedActual, desired);
+
+            if (startCompliant && delayCompliant)
             {
                 return true;
             }
 
-            _log.LogWarning(
-                "Drift: {Id} start type was {Actual}, expected {Desired}; trigger={Source}.",
-                id, actual, desired, source);
+            if (!startCompliant)
+            {
+                _log.LogWarning(
+                    "Drift: {Id} start type was {Actual}, expected {Desired}; trigger={Source}.",
+                    id, actual, desired, source);
 
-            key.SetValue("Start", (int)desired, RegistryValueKind.DWord);
+                key.SetValue("Start", (int)desired, RegistryValueKind.DWord);
+            }
+
+            if (!delayCompliant)
+            {
+                _log.LogWarning(
+                    "Drift: {Id} was Automatic (Delayed Start), expected plain Automatic; trigger={Source}.",
+                    id, source);
+
+                key.SetValue("DelayedAutostart", 0, RegistryValueKind.DWord);
+            }
+
             _log.LogInformation("Enforced: {Id} start type set to {Desired}.", id, desired);
             return true;
         }

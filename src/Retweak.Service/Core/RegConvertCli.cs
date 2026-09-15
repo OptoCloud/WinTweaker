@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using Microsoft.Win32;
 
@@ -49,7 +50,7 @@ public static class RegConvertCli
             string content;
             try
             {
-                content = File.ReadAllText(path);
+                content = ReadRegFile(path);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -91,6 +92,25 @@ public static class RegConvertCli
             "Review before merging into appsettings.json — nothing has been applied.");
 
         return 0;
+    }
+
+    /// <summary>
+    /// A BOM declares its own encoding, which <see cref="File.ReadAllText(string)"/> already
+    /// sniffs correctly. Without one, this is very likely a legacy "REGEDIT4" export, which
+    /// uses the system ANSI code page rather than UTF-8; decoding that as UTF-8 corrupts
+    /// every non-ASCII byte into U+FFFD. Latin-1 maps each byte onto the matching code
+    /// point 1:1, so it does not always reproduce the original ANSI code page's characters
+    /// above 0x7F, but unlike UTF-8 it never corrupts them beyond recovery.
+    /// </summary>
+    private static string ReadRegFile(string path)
+    {
+        byte[] bytes = File.ReadAllBytes(path);
+        bool hasBom =
+            (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE) ||
+            (bytes.Length >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF) ||
+            (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF);
+
+        return hasBom ? File.ReadAllText(path) : Encoding.Latin1.GetString(bytes);
     }
 
     private static object BuildEntryJson(Configuration.BaselineEntry e)

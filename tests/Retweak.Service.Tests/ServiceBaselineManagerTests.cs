@@ -51,6 +51,17 @@ public class ServiceBaselineManagerTests
     }
 
     [Theory]
+    [InlineData(1, ServiceStartMode.Automatic, false)] // delayed-auto flag set: not plain Automatic
+    [InlineData(0, ServiceStartMode.Automatic, true)]
+    [InlineData(null, ServiceStartMode.Automatic, true)] // value absent = not delayed
+    [InlineData(1, ServiceStartMode.Manual, true)] // flag is meaningless outside Automatic
+    [InlineData(1, ServiceStartMode.Disabled, true)]
+    public void DelayedAutostartComplianceOnlyMattersForAutomatic(object? actual, ServiceStartMode desired, bool expected)
+    {
+        Assert.Equal(expected, ServiceBaselineManager.IsDelayedAutostartCompliant(actual, desired));
+    }
+
+    [Theory]
     [InlineData(ServiceControllerStatus.Running, DesiredServiceRunState.Running, true)]
     [InlineData(ServiceControllerStatus.Stopped, DesiredServiceRunState.Stopped, true)]
     [InlineData(ServiceControllerStatus.Stopped, DesiredServiceRunState.Running, false)]

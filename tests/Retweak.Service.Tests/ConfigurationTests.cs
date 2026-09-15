@@ -170,6 +170,23 @@ public class ConfigurationTests
     }
 
     [Fact]
+    public void ShippedAppSettingsBindsAndEveryEntryValidates()
+    {
+        string path = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+
+        IConfigurationRoot config = new ConfigurationBuilder()
+            .AddJsonFile(path, optional: false)
+            .Build();
+
+        RetweakOptions options = config.GetSection(RetweakOptions.SectionName).Get<RetweakOptions>()!;
+
+        Assert.NotEmpty(options.Entries);
+        Assert.All(options.Entries, e => Assert.True(e.TryValidate(out string error), $"{e.Path}!{e.Name}: {error}"));
+        Assert.All(options.ServiceEntries, e => Assert.True(e.TryValidate(out string error), $"{e.Name}: {error}"));
+        Assert.All(options.ScheduledTaskEntries, e => Assert.True(e.TryValidate(out string error), $"{e.Path}: {error}"));
+    }
+
+    [Fact]
     public void RegistryJsonOverrideFlattensIntoConfigurationKeys()
     {
         const string Json = """

@@ -53,19 +53,51 @@ function Write-Step([string] $Message) {
 # own argument parser is naive about quoting. Windows PowerShell 5.1's native-argument
 # encoder (pwsh 7 does not have this bug) can re-quote an array element that already
 # contains a quoted path-with-spaces, producing a doubly-quoted, invalid command line
-# (sc create then fails with exit code 1639). Building the command line ourselves via
-# ProcessStartInfo.ArgumentList sidesteps that encoder entirely: .NET quotes each element
-# using the correct Win32 argv rules, and because no shell is involved, values are never
-# re-interpreted for metacharacters (&, |, ^, %, etc.) the way routing them through
-# cmd.exe would.
+# (sc create then fails with exit code 1639). ProcessStartInfo.ArgumentList would sidestep
+# that encoder entirely, but it does not exist on .NET Framework, which is what Windows
+# PowerShell 5.1 itself runs on — so this builds the command line string by hand, using
+# the same Win32 argv-quoting rules ArgumentList applies internally on .NET Core/.NET 5+.
+# No shell is involved (UseShellExecute is off and sc.exe is launched directly), so values
+# are never re-interpreted for cmd.exe metacharacters (&, |, ^, %, etc.) the way routing
+# them through cmd.exe would be.
+function ConvertTo-EscapedArgument([string] $Argument) {
+    if ($Argument.Length -gt 0 -and $Argument -notmatch '[\s"]') {
+        return $Argument
+    }
+
+    $sb = [System.Text.StringBuilder]::new()
+    $sb.Append('"') | Out-Null
+
+    for ($i = 0; $i -lt $Argument.Length; $i++) {
+        $backslashes = 0
+        while ($i -lt $Argument.Length -and $Argument[$i] -eq '\') {
+            $backslashes++
+            $i++
+        }
+
+        if ($i -eq $Argument.Length) {
+            $sb.Append('\' * ($backslashes * 2)) | Out-Null
+        }
+        elseif ($Argument[$i] -eq '"') {
+            $sb.Append('\' * ($backslashes * 2 + 1)) | Out-Null
+            $sb.Append('"') | Out-Null
+        }
+        else {
+            $sb.Append('\' * $backslashes) | Out-Null
+            $sb.Append($Argument[$i]) | Out-Null
+        }
+    }
+
+    $sb.Append('"') | Out-Null
+    return $sb.ToString()
+}
+
 function Invoke-Sc([string[]] $Arguments) {
     $psi = [System.Diagnostics.ProcessStartInfo]::new('sc.exe')
     $psi.UseShellExecute = $false
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
-    foreach ($arg in $Arguments) {
-        $psi.ArgumentList.Add($arg)
-    }
+    $psi.Arguments = ($Arguments | ForEach-Object { ConvertTo-EscapedArgument $_ }) -join ' '
 
     $proc = [System.Diagnostics.Process]::Start($psi)
     $proc.StandardOutput.ReadToEnd() | Out-Null

@@ -10,7 +10,10 @@ namespace Retweak.Service.Infra;
 /// </summary>
 public sealed class FileLoggerProvider : ILoggerProvider
 {
-    private readonly object _gate = new();
+    /// <summary>Floor for the configured max file size, so a bad config can't roll on every write.</summary>
+    private const long MinLogFileBytes = 64 * 1024;
+
+    private readonly Lock _gate = new();
     private readonly string _directory;
     private readonly string _baseName;
     private readonly long _maxBytes;
@@ -21,7 +24,7 @@ public sealed class FileLoggerProvider : ILoggerProvider
     {
         _directory = Environment.ExpandEnvironmentVariables(directory);
         _baseName = baseName;
-        _maxBytes = Math.Max(64 * 1024, maxBytes);
+        _maxBytes = Math.Max(MinLogFileBytes, maxBytes);
         _retain = Math.Max(1, retain);
     }
 
@@ -64,7 +67,7 @@ public sealed class FileLoggerProvider : ILoggerProvider
 
     private void Roll(string path)
     {
-        string oldest = $"{path}.{_retain}";
+        var oldest = $"{path}.{_retain}";
         if (File.Exists(oldest))
         {
             File.Delete(oldest);
@@ -72,7 +75,7 @@ public sealed class FileLoggerProvider : ILoggerProvider
 
         for (int i = _retain - 1; i >= 1; i--)
         {
-            string from = $"{path}.{i}";
+            var from = $"{path}.{i}";
             if (File.Exists(from))
             {
                 File.Move(from, $"{path}.{i + 1}", overwrite: true);

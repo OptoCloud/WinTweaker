@@ -81,26 +81,15 @@ public sealed class WatcherManager : IDisposable
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-            foreach (string path in wanted)
+            foreach (var watcher in (from path in wanted let description = $"HKLM\\{path}" where !_machineWatchers.Any(w => string.Equals(w.Description, description, StringComparison.OrdinalIgnoreCase)) select RegistryWatcher.TryCreate(
+                         NativeMethods.HKEY_LOCAL_MACHINE,
+                         path,
+                         RegistryHelpers.UseWow64_64Key,
+                         description,
+                         w => _trigger.Request(w.Description),
+                         _watcherLog)).OfType<RegistryWatcher>())
             {
-                string description = $"HKLM\\{path}";
-                if (_machineWatchers.Any(w => string.Equals(w.Description, description, StringComparison.OrdinalIgnoreCase)))
-                {
-                    continue;
-                }
-
-                RegistryWatcher? watcher = RegistryWatcher.TryCreate(
-                    NativeMethods.HKEY_LOCAL_MACHINE,
-                    path,
-                    RegistryHelpers.UseWow64_64Key,
-                    description,
-                    w => _trigger.Request(w.Description),
-                    _watcherLog);
-
-                if (watcher is not null)
-                {
-                    _machineWatchers.Add(watcher);
-                }
+                _machineWatchers.Add(watcher);
             }
         }
     }
@@ -148,7 +137,7 @@ public sealed class WatcherManager : IDisposable
                     continue;
                 }
 
-                List<RegistryWatcher> created = CreateUserWatchers(sid);
+                var created = CreateUserWatchers(sid);
                 if (created.Count > 0)
                 {
                     _userWatchers[sid] = created;
@@ -165,7 +154,7 @@ public sealed class WatcherManager : IDisposable
             }
         }
 
-        foreach (RegistryWatcher w in toDispose)
+        foreach (var w in toDispose)
         {
             w.Dispose();
         }

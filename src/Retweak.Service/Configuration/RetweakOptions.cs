@@ -166,10 +166,10 @@ public sealed class BaselineEntry
 
     private static byte[] ParseHex(string s)
     {
-        ReadOnlySpan<char> src = s.AsSpan().Trim();
-        Span<char> packed = src.Length <= 256 ? stackalloc char[src.Length] : new char[src.Length];
+        var src = s.AsSpan().Trim();
+        var packed = src.Length <= 256 ? stackalloc char[src.Length] : new char[src.Length];
         int n = 0;
-        foreach (char c in src)
+        foreach (var c in src)
         {
             if (c is ' ' or '-' or ':' or ',')
             {

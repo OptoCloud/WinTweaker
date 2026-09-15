@@ -69,17 +69,17 @@ internal sealed class RegistryConfigurationProvider : ConfigurationProvider
 
         try
         {
-            using RegistryKey root = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, _source.View);
-            using RegistryKey? key = root.OpenSubKey(_source.KeyPath, writable: false);
+            using var root = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, _source.View);
+            using var key = root.OpenSubKey(_source.KeyPath, writable: false);
             if (key is null)
             {
                 Data = data;
                 return;
             }
 
-            foreach (string name in ScalarNames)
+            foreach (var name in ScalarNames)
             {
-                object? raw = key.GetValue(name);
+                var raw = key.GetValue(name);
                 if (raw is null)
                 {
                     continue;
@@ -110,7 +110,7 @@ internal sealed class RegistryConfigurationProvider : ConfigurationProvider
 
     private static string? ReadJson(RegistryKey key)
     {
-        object? raw = key.GetValue("Json");
+        var raw = key.GetValue("Json");
         return raw switch
         {
             string s => s,
@@ -140,12 +140,12 @@ internal sealed class RegistryConfigurationProvider : ConfigurationProvider
 
     private static IEnumerable<string> EnumerateKeys(IConfigurationProvider provider, string? parentPath)
     {
-        foreach (string child in provider.GetChildKeys([], parentPath).Distinct(StringComparer.OrdinalIgnoreCase))
+        foreach (var child in provider.GetChildKeys([], parentPath).Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            string path = parentPath is null ? child : ConfigurationPath.Combine(parentPath, child);
+            var path = parentPath is null ? child : ConfigurationPath.Combine(parentPath, child);
             yield return path;
 
-            foreach (string descendant in EnumerateKeys(provider, path))
+            foreach (var descendant in EnumerateKeys(provider, path))
             {
                 yield return descendant;
             }

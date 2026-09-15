@@ -1,10 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Worker">
 
   <PropertyGroup>
-    <TargetFramework>net10.0-windows</TargetFramework>
     <OutputType>Exe</OutputType>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>Retweak.Service</RootNamespace>
     <AssemblyName>Retweak.Service</AssemblyName>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
@@ -18,9 +15,6 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>false</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
-
-    <!-- Lets the project restore/build from a non-Windows SDK host. -->
-    <EnableWindowsTargeting>true</EnableWindowsTargeting>
   </PropertyGroup>
 
   <ItemGroup>

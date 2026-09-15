@@ -12,6 +12,9 @@ public readonly record struct NormOptions(
 
 public static class RegistryHelpers
 {
+    /// <summary>Longest value rendered by <see cref="Describe"/> before it is truncated with an ellipsis.</summary>
+    private const int MaxDescribeLength = 120;
+
     /// <summary>
     /// The view to use for every registry operation. On a 64-bit OS we always want the
     /// native 64-bit view; on a 32-bit OS Registry64 is meaningless and Registry32 is the
@@ -38,6 +41,7 @@ public static class RegistryHelpers
     /// Value read with <see cref="RegistryValueOptions.DoNotExpandEnvironmentNames"/>, or null
     /// when absent.
     /// </param>
+    /// <param name="options"></param>
     public static bool EqualsNorm(
         RegistryValueKind desiredKind,
         object desiredValue,
@@ -182,7 +186,7 @@ public static class RegistryHelpers
             case ulong ul:
                 result = unchecked((long)ul);
                 return true;
-            case byte[] b when b.Length is 4 or 8:
+            case byte[] { Length: 4 or 8 } b:
                 // REG_BINARY holding a little-endian integer.
                 result = b.Length == 4
                     ? BitConverter.ToUInt32(b)
@@ -262,6 +266,8 @@ public static class RegistryHelpers
         }
 
         string s = Stringify(value);
-        return s.Length <= 120 ? s : string.Concat(s.AsSpan(0, 117), "...");
+        return s.Length <= MaxDescribeLength
+            ? s
+            : string.Concat(s.AsSpan(0, MaxDescribeLength - 3), "...");
     }
 }

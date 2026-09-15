@@ -10,10 +10,12 @@ namespace Retweak.Service.Infra;
 /// Time-based suppression alone would be wrong here: a real change landing inside the
 /// suppression window would be dropped entirely.
 /// </summary>
-public sealed class ChangeTrigger
+public sealed class ChangeTrigger : IDisposable
 {
     private readonly SemaphoreSlim _signal = new(0, 1);
     private string _lastSource = "unknown";
+
+    public void Dispose() => _signal.Dispose();
 
     public void Request(string source)
     {

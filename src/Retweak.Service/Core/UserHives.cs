@@ -22,22 +22,13 @@ public static partial class UserHives
     /// </summary>
     public static IReadOnlyList<string> GetLoadedUserSids(RegistryView view)
     {
-        using RegistryKey hku = RegistryKey.OpenBaseKey(RegistryHive.Users, view);
+        using var hku = RegistryKey.OpenBaseKey(RegistryHive.Users, view);
         return GetLoadedUserSids(hku);
     }
 
     public static IReadOnlyList<string> GetLoadedUserSids(RegistryKey hku)
     {
-        var result = new List<string>();
-        foreach (string name in hku.GetSubKeyNames())
-        {
-            if (IsUserSid(name))
-            {
-                result.Add(name);
-            }
-        }
-
-        return result;
+        return [.. hku.GetSubKeyNames().Where(IsUserSid)];
     }
 
     /// <summary>
@@ -48,8 +39,8 @@ public static partial class UserHives
     {
         try
         {
-            using RegistryKey hku = RegistryKey.OpenBaseKey(RegistryHive.Users, view);
-            using RegistryKey? key = hku.OpenSubKey(sid, writable: false);
+            using var hku = RegistryKey.OpenBaseKey(RegistryHive.Users, view);
+            using var key = hku.OpenSubKey(sid, writable: false);
             return key is not null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)

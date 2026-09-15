@@ -2,9 +2,7 @@ using System.Runtime.Versioning;
 using System.Security.Principal;
 using System.ServiceProcess;
 using System.Threading.Channels;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Hosting.WindowsServices;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace Retweak.Service.Infra;
@@ -133,7 +131,7 @@ public sealed class SessionAwareLifetime : WindowsServiceLifetime
         // token queries can block briefly during logon.
         ThreadPool.UnsafeQueueUserWorkItem(_ =>
         {
-            string? sid = kind == SessionEventKind.Logoff
+            var sid = kind == SessionEventKind.Logoff
                 ? null
                 : SessionSid.TryResolve(sessionId, _log);
 

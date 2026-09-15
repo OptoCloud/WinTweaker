@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Win32;
 using Retweak.Service.Configuration;
@@ -37,7 +36,7 @@ public sealed class BaselineManager
     // once rather than on every pass, and so the return to compliance is logged exactly once.
     private readonly HashSet<string> _noncompliant = new(StringComparer.OrdinalIgnoreCase);
 
-    private readonly object _applyGate = new();
+    private readonly Lock _applyGate = new();
     private bool _applyInProgress;
     private bool _rerunRequested;
 
@@ -82,7 +81,7 @@ public sealed class BaselineManager
 
         try
         {
-            PassReport last = default;
+            PassReport last;
             while (true)
             {
                 last = RunPass(source);
@@ -191,14 +190,19 @@ public sealed class BaselineManager
         ForEachTarget((root, path, entry, scopeTag) =>
         {
             examined++;
-            EntryOutcome outcome = ApplyOne(root, path, entry, scopeTag, source);
-            if (outcome == EntryOutcome.Repaired)
+            var outcome = ApplyOne(root, path, entry, scopeTag, source);
+            switch (outcome)
             {
-                repaired++;
-            }
-            else if (outcome == EntryOutcome.Failed)
-            {
-                failed++;
+                case EntryOutcome.Repaired:
+                    repaired++;
+                    break;
+                case EntryOutcome.Failed:
+                    failed++;
+                    break;
+                case EntryOutcome.Compliant:
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException();
             }
         });
 
@@ -321,7 +325,7 @@ public sealed class BaselineManager
                     source);
             }
 
-            using RegistryKey? writable = root.CreateSubKey(path, writable: true);
+            using var writable = root.CreateSubKey(path, writable: true);
             if (writable is null)
             {
                 _log.LogError("Could not open or create {Id} for writing.", id);

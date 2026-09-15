@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 
 namespace Retweak.Service.Infra;
@@ -202,8 +203,10 @@ internal sealed class RegistryWatcher : IDisposable
         if (hKey != IntPtr.Zero)
         {
             // Closing the key cancels any pending notification and signals the event,
-            // which is why _disposed is checked at the top of OnSignal.
-            NativeMethods.RegCloseKey(hKey);
+            // which is why _disposed is checked at the top of OnSignal. The return code
+            // is not actionable here: Dispose has no way to retry or report a failure.
+            int rc = NativeMethods.RegCloseKey(hKey);
+            Debug.Assert(rc == NativeMethods.ERROR_SUCCESS, $"RegCloseKey failed with {rc}.");
         }
 
         // The event is intentionally not disposed here. Unregister(null) does not wait for

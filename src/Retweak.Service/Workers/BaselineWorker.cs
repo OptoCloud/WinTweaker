@@ -27,6 +27,21 @@ public sealed class BaselineWorker : BackgroundService
     private readonly SessionEventBus _sessions;
     private readonly ILogger<BaselineWorker> _log;
 
+    /// <summary>Ceiling on the exponential backoff applied when a loop faults repeatedly.</summary>
+    private const int MaxLoopBackoffSeconds = 60;
+
+    /// <summary>
+    /// Caps the exponent in <c>1 &lt;&lt; consecutiveFailures</c> so the shift itself never
+    /// overflows; the <see cref="MaxLoopBackoffSeconds"/> clamp makes anything past this moot.
+    /// </summary>
+    private const int MaxLoopBackoffShift = 6;
+
+    /// <summary>Ceiling on the logon hive-poll backoff, so a slow profile load is still polled often enough.</summary>
+    private static readonly TimeSpan MaxLogonPollDelay = TimeSpan.FromSeconds(5);
+
+    /// <summary>Growth factor applied to the logon hive-poll delay after each unsuccessful attempt.</summary>
+    private const double LogonPollBackoffFactor = 1.5;
+
     public BaselineWorker(
         IOptions<RetweakOptions> options,
         BaselineManager baseline,
@@ -105,7 +120,8 @@ public sealed class BaselineWorker : BackgroundService
             catch (Exception ex)
             {
                 consecutiveFailures++;
-                TimeSpan delay = TimeSpan.FromSeconds(Math.Min(60, 1 << Math.Min(6, consecutiveFailures)));
+                TimeSpan delay = TimeSpan.FromSeconds(
+                    Math.Min(MaxLoopBackoffSeconds, 1 << Math.Min(MaxLoopBackoffShift, consecutiveFailures)));
                 _log.LogError(ex, "Loop '{Loop}' faulted (attempt {Attempt}); restarting in {Delay}.",
                     name, consecutiveFailures, delay);
 
@@ -210,7 +226,7 @@ public sealed class BaselineWorker : BackgroundService
             }
 
             await Task.Delay(delay, stoppingToken).ConfigureAwait(false);
-            delay = TimeSpan.FromSeconds(Math.Min(5, delay.TotalSeconds * 1.5));
+            delay = TimeSpan.FromSeconds(Math.Min(MaxLogonPollDelay.TotalSeconds, delay.TotalSeconds * LogonPollBackoffFactor));
         }
 
         _log.LogWarning(

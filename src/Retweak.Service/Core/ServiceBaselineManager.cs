@@ -28,6 +28,25 @@ public sealed class ServiceBaselineManager
         _log = log;
     }
 
+    /// <summary>
+    /// Pure compliance check for a service's Start registry value, split out from
+    /// <see cref="ApplyStartType"/> so it is testable without a live registry.
+    /// </summary>
+    internal static bool IsStartTypeCompliant(object? actual, ServiceStartMode desired) =>
+        actual is int current && current == (int)desired;
+
+    /// <summary>
+    /// Pure compliance check for a service's running state, split out from
+    /// <see cref="ApplyRunState"/> so it is testable without a live SCM.
+    /// </summary>
+    internal static bool IsRunStateCompliant(ServiceControllerStatus actual, DesiredServiceRunState desired) =>
+        desired switch
+        {
+            DesiredServiceRunState.Running => actual == ServiceControllerStatus.Running,
+            DesiredServiceRunState.Stopped => actual == ServiceControllerStatus.Stopped,
+            _ => true,
+        };
+
     public PassReport ApplyBaseline(string source)
     {
         var sw = Stopwatch.StartNew();
@@ -80,7 +99,7 @@ public sealed class ServiceBaselineManager
             }
 
             object? actual = key.GetValue("Start");
-            if (actual is int current && current == (int)desired)
+            if (IsStartTypeCompliant(actual, desired))
             {
                 return true;
             }
@@ -109,14 +128,7 @@ public sealed class ServiceBaselineManager
             using var sc = new ServiceController(entry.Name);
             sc.Refresh();
 
-            bool compliant = desired switch
-            {
-                DesiredServiceRunState.Running => sc.Status == ServiceControllerStatus.Running,
-                DesiredServiceRunState.Stopped => sc.Status == ServiceControllerStatus.Stopped,
-                _ => true,
-            };
-
-            if (compliant)
+            if (IsRunStateCompliant(sc.Status, desired))
             {
                 return true;
             }
